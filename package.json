@@ -1,0 +1,25 @@
+{
+  "name": "polaris-pas",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Polaris PAS — multi-tenant P&C policy administration system (Ontario personal auto first)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json && tsc -p apps/web/tsconfig.json",
+    "test:e2e": "node apps/web/e2e/smoke.mjs",
+    "dev:api": "node --experimental-transform-types apps/api/src/server.ts",
+    "dev:web": "npm run dev -w apps/web",
+    "seed": "node --experimental-transform-types apps/api/src/seed.ts",
+    "build:web": "npm run build -w @polaris/web"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "playwright-core": "^1.62.1",
+    "typescript": "^5.6.0",
+    "vitest": "^3.2.7"
+  }
+}

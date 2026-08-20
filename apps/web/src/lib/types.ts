@@ -1,0 +1,266 @@
+export type Role = 'csr' | 'underwriter' | 'admin';
+export type InstallmentPlan = 'full' | 'monthly' | 'quarterly';
+export type JobStatus = 'Draft' | 'Quoted' | 'Bound' | 'Issued' | 'Declined' | 'Withdrawn';
+export type JobType = 'Submission' | 'PolicyChange' | 'Renewal' | 'Cancellation';
+
+export interface Driver {
+  id: string;
+  firstName: string;
+  lastName: string;
+  dateOfBirth: string;
+  licenceNumber: string;
+  yearsLicensed: number;
+  atFaultClaims: number;
+  minorConvictions: number;
+}
+
+export interface Vehicle {
+  id: string;
+  year: number;
+  make: string;
+  model: string;
+  vin: string;
+  valueCents: number;
+  rateGroup: number;
+  primaryUse: 'pleasure' | 'commute' | 'business';
+  annualKm: number;
+  postalCode: string;
+  principalDriverId: string;
+}
+
+export interface CoverageSelection {
+  vehicleId: string;
+  coverageCode: string;
+  limitCents?: number;
+  deductibleCents?: number;
+}
+
+export interface RiskData {
+  drivers: Driver[];
+  vehicles: Vehicle[];
+  coverages: CoverageSelection[];
+  termMonths: number;
+}
+
+export interface CoverageDef {
+  code: string;
+  name: string;
+  kind: 'liability' | 'accidentBenefits' | 'physicalDamage' | 'endorsement';
+  mandatory: boolean;
+  limitOptionsCents?: number[];
+  deductibleOptionsCents?: number[];
+  baseRateCents: number;
+  flatPremium?: boolean;
+}
+
+export interface ProductDefinition {
+  productCode: string;
+  productName: string;
+  province: string;
+  version: number;
+  effectiveDate: string;
+  sample: true;
+  coverages: CoverageDef[];
+}
+
+export interface UwReferral {
+  ruleCode: string;
+  description: string;
+  detail: string;
+}
+
+export interface CoveragePremium {
+  vehicleId: string;
+  coverageCode: string;
+  coverageName: string;
+  annualPremiumCents: number;
+}
+
+export interface RatingResult {
+  lines: CoveragePremium[];
+  vehicleTotals: { vehicleId: string; annualPremiumCents: number }[];
+  totalAnnualPremiumCents: number;
+  referrals: UwReferral[];
+}
+
+export interface JobQuote {
+  kind: 'risk' | 'cancellation';
+  effectiveDate: string;
+  termStart: string;
+  termEnd: string;
+  changeAmountCents: number;
+  referrals: UwReferral[];
+  quotedAt: string;
+  annualPremiumCents: number;
+  priorAnnualPremiumCents?: number;
+  refundCents?: number;
+  rating?: RatingResult;
+}
+
+export interface Job {
+  id: string;
+  accountId: string;
+  jobType: JobType;
+  status: JobStatus;
+  policyId: string | null;
+  productCode: string;
+  billingPlan: InstallmentPlan;
+  effectiveDate: string;
+  termStart: string;
+  termEnd: string;
+  risk: RiskData;
+  quote: JobQuote | null;
+  uwApproved: boolean;
+  uwNote: string | null;
+  cancelReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JobEvent {
+  id: string;
+  action: string;
+  fromStatus: string;
+  toStatus: string;
+  actorRole: string;
+  actorName: string | null;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface Address {
+  line1: string;
+  line2: string | null;
+  city: string;
+  province: string;
+  postalCode: string;
+}
+
+export interface Account {
+  id: string;
+  accountNumber: string;
+  accountType: 'person' | 'organization';
+  name: string;
+  email: string | null;
+  phone: string | null;
+  address: Address;
+  producerCode: string | null;
+  createdAt: string;
+}
+
+export interface AccountRollup {
+  policyCount: number;
+  inForceCount: number;
+  openJobCount: number;
+  annualPremiumCents: number;
+  billedCents: number;
+  paidCents: number;
+  balanceCents: number;
+  pastDueCents: number;
+}
+
+export interface Policy {
+  id: string;
+  accountId: string;
+  policyNumber: string;
+  productCode: string;
+  status: 'InForce' | 'Cancelled' | 'Expired';
+  billingPlan: InstallmentPlan;
+}
+
+export interface PolicySummary extends Policy {
+  accountName?: string;
+  accountNumber?: string;
+  termStart: string | null;
+  termEnd: string | null;
+  annualPremiumCents: number;
+  balanceCents: number;
+  pastDueCents: number;
+  nextDue?: { dueDate: string; amountCents: number } | null;
+}
+
+export interface PolicyVersion {
+  id: string;
+  versionNumber: number;
+  termNumber: number;
+  transactionType: string;
+  effectiveDate: string;
+  termStart: string;
+  termEnd: string;
+  annualPremiumCents: number;
+  risk: RiskData;
+  jobId: string;
+  createdAt: string;
+}
+
+export interface LedgerTransaction {
+  id: string;
+  type: string;
+  effectiveDate: string;
+  amountCents: number;
+  jobId: string;
+  createdAt: string;
+}
+
+export type InvoiceStatus = 'planned' | 'due' | 'overdue' | 'paid' | 'void' | 'credit';
+
+export interface Invoice {
+  id: string;
+  policyId: string;
+  invoiceNumber: string;
+  sequence: number;
+  termNumber: number;
+  dueDate: string;
+  amountCents: number;
+  paidCents: number;
+  outstandingCents: number;
+  status: InvoiceStatus;
+}
+
+export interface Payment {
+  id: string;
+  amountCents: number;
+  method: 'card' | 'eft' | 'cheque' | 'cash';
+  reference: string | null;
+  receivedAt: string;
+}
+
+export interface PolicyBilling {
+  plan: InstallmentPlan;
+  billedCents: number;
+  paidCents: number;
+  balanceCents: number;
+  pastDueCents: number;
+  nextDue: { dueDate: string; amountCents: number } | null;
+  invoices: Invoice[];
+}
+
+export interface WorklistItem {
+  jobId: string;
+  jobType: JobType;
+  status: JobStatus;
+  accountId: string;
+  accountName: string;
+  accountNumber: string;
+  policyId: string | null;
+  policyNumber: string | null;
+  productCode: string;
+  effectiveDate: string;
+  annualPremiumCents: number;
+  changeAmountCents: number;
+  referrals: UwReferral[];
+  uwApproved: boolean;
+  updatedAt: string;
+}
+
+export interface Worklist {
+  counts: { referred: number; awaitingBind: number; draft: number; bound: number };
+  referrals: WorklistItem[];
+  readyToBind: WorklistItem[];
+}
+
+export interface DemoCredential {
+  role: Role;
+  username: string;
+  password: string;
+}

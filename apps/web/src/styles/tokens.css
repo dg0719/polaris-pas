@@ -1,0 +1,76 @@
+/*
+ * Polaris design tokens. See DESIGN.md for the reasoning.
+ * Structural ink: near-black on white, hairline rules, one signal colour.
+ */
+
+:root {
+  /* Surfaces --------------------------------------------------------------- */
+  --bg: oklch(1 0 0);
+  --bg-sunken: oklch(0.975 0 0);
+  --bg-raised: oklch(0.985 0 0);
+
+  /* Ink -------------------------------------------------------------------- */
+  --ink: oklch(0.17 0 0);
+  --ink-2: oklch(0.44 0 0);
+  --ink-3: oklch(0.47 0 0);
+  --ink-inverse: oklch(0.99 0 0);
+
+  /* Rules ------------------------------------------------------------------ */
+  --rule: oklch(0.9 0 0);
+  --rule-strong: oklch(0.72 0 0);
+
+  /* Signal: a fill, never a text colour. Near-black type sits on it at ~9:1. */
+  --signal: oklch(0.797 0.166 113.1);
+  --signal-deep: oklch(0.47 0.098 113.1);
+  --signal-wash: oklch(0.965 0.038 113.1);
+
+  --negative: oklch(0.5 0.17 27);
+  --negative-wash: oklch(0.968 0.02 27);
+
+  /* Type ------------------------------------------------------------------- */
+  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+
+  /* Space ------------------------------------------------------------------ */
+  --s-1: 2px;
+  --s-2: 4px;
+  --s-3: 8px;
+  --s-4: 12px;
+  --s-5: 16px;
+  --s-6: 24px;
+  --s-7: 32px;
+  --s-8: 48px;
+  --s-9: 64px;
+
+  --rail-w: 208px;
+  --content-max: 1280px;
+
+  --r-sm: 3px;
+  --r-md: 6px;
+
+  /* One shadow, for things that genuinely float. */
+  --shadow-float: 0 8px 24px -8px oklch(0.17 0 0 / 0.18);
+
+  --z-sticky: 10;
+  --z-dropdown: 20;
+  --z-backdrop: 30;
+  --z-modal: 40;
+  --z-toast: 50;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur: 180ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur: 1ms;
+  }
+}

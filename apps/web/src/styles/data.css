@@ -1,0 +1,217 @@
+/* Tables, definition lists, status and money: how the record is displayed. */
+
+/* ─── Tables ────────────────────────────────────────────────────────────── */
+
+.table-wrap {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+/* Below this width the table scrolls inside its wrapper instead of crushing
+   every column. The page itself never scrolls sideways. */
+.table-wrap > table.data {
+  min-width: 46rem;
+}
+
+.table-wrap--wide > table.data {
+  min-width: 58rem;
+}
+
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+table.data caption {
+  text-align: left;
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  padding-bottom: var(--s-3);
+}
+
+table.data thead th {
+  text-align: left;
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--rule-strong);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: var(--z-sticky);
+}
+
+table.data tfoot th {
+  text-align: left;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink-2);
+  padding: var(--s-4);
+  border-top: 1px solid var(--rule-strong);
+}
+
+table.data tfoot td {
+  border-top: 1px solid var(--rule-strong);
+  border-bottom: 0;
+}
+
+table.data tfoot tr:hover {
+  background: transparent;
+}
+
+table.data td {
+  padding: var(--s-4);
+  border-bottom: 1px solid var(--rule);
+  vertical-align: baseline;
+}
+
+table.data td.date,
+table.data td.mono,
+table.data th.date {
+  white-space: nowrap;
+}
+
+table.data tbody tr {
+  transition: background var(--dur) var(--ease-out);
+}
+
+table.data tbody tr:hover {
+  background: var(--bg-sunken);
+}
+
+table.data tbody tr.is-flagged {
+  background: var(--signal-wash);
+}
+
+table.data tbody tr.is-flagged:hover {
+  background: oklch(0.95 0.05 113.1);
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+th.num {
+  text-align: right;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.money--negative {
+  color: var(--negative);
+}
+
+.cell-title {
+  display: block;
+  font-size: var(--text-base);
+  font-weight: 500;
+}
+
+.cell-sub {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  margin-top: var(--s-1);
+}
+
+.row-link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+td.anchor {
+  position: relative;
+}
+
+/* ─── Definition lists (the record, without cards) ──────────────────────── */
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--s-5) var(--s-6);
+}
+
+.facts--tight {
+  gap: var(--s-4) var(--s-5);
+}
+
+.fact dt,
+.fact-label {
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  margin-bottom: var(--s-1);
+}
+
+.fact dd,
+.fact-value {
+  font-size: var(--text-base);
+  margin: 0;
+}
+
+.fact-value--lead {
+  font-size: var(--text-2xl);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* ─── Status ────────────────────────────────────────────────────────────── */
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: var(--rule-strong);
+}
+
+.status--flag {
+  padding: var(--s-1) var(--s-2);
+  background: var(--signal);
+  color: var(--ink);
+}
+
+.status--flag::before {
+  background: var(--ink);
+}
+
+.status--negative {
+  padding: var(--s-1) var(--s-2);
+  background: var(--negative-wash);
+  color: var(--negative);
+}
+
+.status--negative::before {
+  background: var(--negative);
+}
+
+.status--done::before {
+  background: var(--ink-2);
+}
+
+.status--muted {
+  color: var(--ink-3);
+}
