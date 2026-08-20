@@ -26,7 +26,7 @@ afterEach(async () => {
 async function call(method: string, path: string, options: { key?: string; body?: unknown } = {}) {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (options.key) headers['authorization'] = `Bearer ${options.key}`;
-  const res = await fetch(`${baseUrl}${path}`, {
+  const res = await fetch(`${baseUrl}/api${path}`, {
     method,
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),

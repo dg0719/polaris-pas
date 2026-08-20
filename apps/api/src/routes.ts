@@ -5,6 +5,7 @@ import { registerAccountRoutes } from './routes/accounts.ts';
 import { registerJobRoutes } from './routes/jobs.ts';
 import { registerDemoRoutes, registerMetaRoutes } from './routes/meta.ts';
 import { registerPolicyRoutes } from './routes/policies.ts';
+import type { StaticSite } from './static.ts';
 
 export function buildRouter(db: Db): Router {
   const router = new Router();
@@ -23,8 +24,27 @@ function applyCors(res: ServerResponse): void {
   res.setHeader('access-control-allow-methods', 'GET, POST, PUT, DELETE, OPTIONS');
 }
 
-/** Build the node:http request listener for a given database handle. */
-export function createApp(db: Db): (req: IncomingMessage, res: ServerResponse) => void {
+const API_PREFIX = '/api';
+
+/**
+ * The client and the API share an origin, so the API answers under /api and
+ * the client owns every other path. Without the prefix they would collide:
+ * /accounts is both an API resource and a screen in the app.
+ */
+function apiPath(pathname: string): string | null {
+  if (pathname === API_PREFIX) return '/';
+  if (pathname.startsWith(`${API_PREFIX}/`)) return pathname.slice(API_PREFIX.length);
+  return null;
+}
+
+/**
+ * Build the node:http request listener. Pass `site` to also serve the built
+ * web client from the same process; omit it to run API-only.
+ */
+export function createApp(
+  db: Db,
+  site: StaticSite | null = null,
+): (req: IncomingMessage, res: ServerResponse) => void {
   const router = buildRouter(db);
 
   return (req, res) => {
@@ -38,7 +58,18 @@ export function createApp(db: Db): (req: IncomingMessage, res: ServerResponse) =
         }
 
         const url = new URL(req.url ?? '/', 'http://localhost');
-        const match = router.match(req.method ?? 'GET', url.pathname);
+        const routed = apiPath(url.pathname);
+
+        if (routed === null) {
+          // Not an API call: hand it to the client build, if one is served.
+          if (site && (req.method === 'GET' || req.method === 'HEAD')) {
+            if (site.serve(url.pathname, res)) return;
+          }
+          sendJson(res, 404, { error: { code: 'not_found', message: 'No such route' } });
+          return;
+        }
+
+        const match = router.match(req.method ?? 'GET', routed);
         if (!match) {
           sendJson(res, 404, { error: { code: 'not_found', message: 'No such route' } });
           return;

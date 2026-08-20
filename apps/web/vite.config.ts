@@ -5,12 +5,12 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    // The API holds the session; proxying keeps the browser same-origin.
+    // The API answers under /api in production too, so the proxy forwards the
+    // path unchanged: dev and production speak identical URLs.
     proxy: {
       '/api': {
         target: process.env.POLARIS_API ?? 'http://localhost:3000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
       },
     },
   },

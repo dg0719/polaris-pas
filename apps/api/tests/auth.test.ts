@@ -27,7 +27,7 @@ afterEach(async () => {
 });
 
 async function login(body: unknown) {
-  const res = await fetch(`${baseUrl}/auth/login`, {
+  const res = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -98,7 +98,7 @@ describe('the login endpoint', () => {
     expect(res.status).toBe(200);
     expect((res.body['user'] as Record<string, unknown>)['name']).toBe('Uma Wright');
 
-    const me = await fetch(`${baseUrl}/me`, {
+    const me = await fetch(`${baseUrl}/api/me`, {
       headers: { authorization: `Bearer ${res.body['token'] as string}` },
     });
     expect(me.status).toBe(200);
@@ -117,7 +117,7 @@ describe('the login endpoint', () => {
 
   test('the credential hint is not served unless the demo flag is set', async () => {
     // POLARIS_DEMO is unset in the test environment.
-    const res = await fetch(`${baseUrl}/demo/credentials`);
+    const res = await fetch(`${baseUrl}/api/demo/credentials`);
     expect(res.status).toBe(404);
   });
 });
