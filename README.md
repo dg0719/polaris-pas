@@ -7,11 +7,35 @@ First product: **Ontario personal auto**.
 > not filed rates. Coverage codes and OPCF endorsement numbers follow public Ontario
 > regulatory structure; the numbers attached to them do not.
 
-## Running the demo
+## Requirements
+
+**Node 24 or newer.** Not optional: the API uses `node:sqlite` and runs
+TypeScript directly through Node's type stripping, neither of which exists in
+Node 20. There is an `.nvmrc`, so `nvm use` picks the right version. Nothing
+else is needed — no database server, no Docker, no global tooling.
+
+The browser test (`npm run test:e2e`) additionally needs Google Chrome
+installed; nothing else does.
+
+## Running it
+
+Two ways. **One process, as you would deploy it:**
 
 ```bash
-npm install
+npm ci
+npm run build                # builds the web client
 npm run seed                 # creates polaris.db and a book of business
+npm start                    # everything on http://localhost:3000
+```
+
+The server hosts the API under `/api` and the built client on every other
+path, so there is nothing else to run and no CORS to configure.
+
+**Two processes, for development** (Vite gives you hot reload):
+
+```bash
+npm ci
+npm run seed
 npm run dev:api              # terminal 1 — API on :3000
 npm run dev:web              # terminal 2 — UI on :5173
 ```
@@ -38,8 +62,33 @@ the username. They are deliberately not advertised.
 | `npm run typecheck` | both TypeScript projects |
 | `npm run build:web` | production build of the client |
 
-`POLARIS_DB` overrides the SQLite file, `PORT` the API port, `POLARIS_API` the API the web
-dev server proxies to.
+### Configuration
+
+Every setting has a working default; see [.env.example](.env.example).
+
+| Variable | Default | What it does |
+|---|---|---|
+| `POLARIS_DB` | `polaris.db` | SQLite file. Created by `npm run seed`. |
+| `PORT` | `3000` | Port the server listens on. |
+| `POLARIS_DEMO` | unset | `1` prints the demo logins on the sign-in screen. Leave unset in a real deployment. |
+| `POLARIS_WEB_DIR` | `apps/web/dist` | Where the built client lives. |
+| `POLARIS_SERVE_WEB` | `1` | `0` runs API-only, for when something else serves the client. |
+| `POLARIS_API` | `http://localhost:3000` | Dev only: what the Vite dev server proxies `/api` to. |
+
+### Deploying elsewhere
+
+The whole app is one Node process and one file on disk:
+
+```bash
+git clone <this repo> && cd polaris-pas
+npm ci && npm run build && npm run seed
+POLARIS_DEMO=1 PORT=8080 npm start
+```
+
+Behind a reverse proxy, forward everything to that port; the app needs no path
+rewriting. To persist data across deploys, point `POLARIS_DB` at a file on a
+mounted volume. There is no migration path between schema versions yet, so a
+schema change means reseeding.
 
 ## What the demo contains
 
@@ -144,6 +193,9 @@ repository read is scoped by it. Account and policy number sequences are per ten
 (`ACME-A0001`, `ACME-000001`).
 
 ## API
+
+Every path below is served under the `/api` prefix, e.g. `GET /api/worklist`.
+The client owns every other path.
 
 | Method | Path | Notes |
 |---|---|---|
