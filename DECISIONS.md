@@ -10,6 +10,40 @@ entry that supersedes it.
 
 ---
 
+## D-016 · The objective is a production system, not a demonstration
+
+**2026-08-20**
+
+Stated by Dave when asked directly: build a production-ready core insurance
+system for small and mid-sized Canadian property and casualty insurers,
+covering policy administration, billing **and claims**, aiming at parity with
+Guidewire InsuranceSuite, moving fast.
+
+**Recorded because** the first session inferred a much smaller goal. `PRODUCT.md`
+had carried an invented purpose statement — that the system replaced "a
+mainframe screen and a spreadsheet" — which no one had ever said. It was
+written to give the interface design a point of view, and it went unchallenged
+for a day. It has been replaced with the real objective. **Do not invent
+rationale and leave it in a file where a later session will read it as fact.**
+
+**Consequences:**
+
+- Claims is a third pillar in scope and has not been started.
+- Billing is roughly a tenth of what a carrier needs.
+- The product model must express *any* carrier's filed rates, versioned by
+  effective date. One hard-coded product is the main obstacle to a second
+  customer.
+- D-013 (no migrations), D-014 (demonstration sign-in) and D-003 (zero runtime
+  dependencies, SQLite) are now provisional. Each has a moment where it becomes
+  unacceptable, listed in `ROADMAP.md`.
+- Literal Guidewire parity is not achievable and should not be planned for.
+  `CLAUDE.md` says why, and what to aim at instead.
+
+**Audience:** insurance people, technical evaluators and business buyers all
+have to be convinced. None of the three can be systematically neglected.
+
+---
+
 ## D-001 · The rate tables are invented, not actuarial
 
 **2026-08-20**
@@ -33,6 +67,10 @@ invented is the magnitude of every factor.
 audience. The next honest step is structural fidelity — separate vehicle rate
 groups per coverage, finer territories, driver age, discounts — with the
 numbers still labelled illustrative.
+
+**Superseded in part by D-016.** Under the production objective we never supply
+real rates at all: the carrier supplies theirs. What must grow is the *engine's*
+ability to express a real filed programme.
 
 ---
 
@@ -70,6 +108,10 @@ framework upgrade treadmill. The router is about 120 lines.
 
 **Cost, accepted:** no ecosystem of middleware. Things like rate limiting or
 sessions would be hand-written.
+
+**Provisional under D-016.** SQLite in particular will not survive a real
+deployment with more than one process. Treat the dependency count as a pleasant
+property, not a constraint worth distorting the design to preserve.
 
 ---
 
@@ -244,6 +286,10 @@ money is far worse than an explicit refusal. Failing loudly is honest.
 **Revisit when:** anyone has data they care about. That is the moment migrations
 stop being premature.
 
+**Under D-016 this has a countdown on it.** The transition from "no data worth
+keeping" to "a carrier's book of business" happens once and cannot be undone.
+Migrations must exist before the first real user, not after.
+
 ---
 
 ## D-014 · Sign-in is a real form, but not a security boundary
@@ -266,6 +312,10 @@ README says so too.
 **Side effect:** the second tenant, Northstar Mutual, still exists with its own
 book of business and its own logins, but those are suffixed and not advertised,
 so nobody reaches it from the sign-in screen by accident.
+
+**Provisional under D-016.** A production system needs real sessions with
+expiry and revocation, password management, and eventually federated sign-in
+and multi-factor. This is not a small task and should not be scoped as one.
 
 ---
 

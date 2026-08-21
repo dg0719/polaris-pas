@@ -12,11 +12,17 @@ Secondary, served but not optimised for: CSRs entering submissions, and billing 
 
 The job to be done: **clear the referral queue without missing anything.** Success is an underwriter who trusts that what's on screen is the whole picture.
 
+As billing and claims arrive, the billing clerk and the adjuster become primary users of their own surfaces. The underwriter's primacy describes the screens built so far, not a permanent hierarchy.
+
 ## Product Purpose
 
-Polaris is a multi-tenant policy administration system for P&C insurers. Ontario personal auto is the first product. It holds the customer account, the submission-to-issue workflow, the policy record with its full version history, and the billing schedule that follows from it.
+A production-ready core insurance system for small and mid-sized Canadian property and casualty insurers, covering all three operational pillars: policy administration, billing, and claims. The reference point is Guidewire InsuranceSuite; the opening is that small carriers are priced out of the enterprise suites and run legacy or in-house systems instead.
 
-It exists because the workflow it replaces is a mainframe screen and a spreadsheet. Success looks like: an underwriter clears a referral in under a minute, and the money is right to the cent afterwards.
+Ontario personal auto is the first product, not the point. The point is a product model expressive enough to hold any carrier's filed programme, so the same system can be sold to the next carrier without being rewritten.
+
+Success at the current stage: an underwriter clears a referral in under a minute, and the money is right to the cent afterwards. Success at the objective: a carrier runs their book on it.
+
+See `ROADMAP.md` for sequencing and `CLAUDE.md` for an honest assessment of the ambition.
 
 ## Brand Personality
 

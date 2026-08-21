@@ -1,7 +1,10 @@
 # Polaris PAS
 
-Multi-tenant P&C policy administration system with a working web client.
-First product: **Ontario personal auto**.
+A core insurance system for small and mid-sized Canadian property and casualty insurers:
+policy administration, billing and claims. Policy administration is substantially built,
+billing is a working slice, claims has not been started. See [ROADMAP.md](ROADMAP.md).
+
+First product: **Ontario personal auto**, with a working web client.
 
 > ⚠️ All rates, factors and underwriting rules in this repository are **illustrative samples**,
 > not filed rates. Coverage codes and OPCF endorsement numbers follow public Ontario
@@ -139,7 +142,8 @@ anything:
 
 | File | Answers |
 |---|---|
-| [CLAUDE.md](CLAUDE.md) | How to work on this: invariants, conventions, what to ask before doing |
+| [CLAUDE.md](CLAUDE.md) | The objective, the invariants, conventions, what to ask before doing |
+| [ROADMAP.md](ROADMAP.md) | Where this is going: policy, billing, claims, and in what order |
 | [DECISIONS.md](DECISIONS.md) | Why it is shaped this way, and what was rejected |
 | [PRODUCT.md](PRODUCT.md) | Who it is for and the principles behind it |
 | [DESIGN.md](DESIGN.md) | The visual system |
