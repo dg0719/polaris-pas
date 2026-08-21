@@ -6,39 +6,71 @@ going), `DECISIONS.md` (why it is the way it is), `README.md` (how to run it),
 
 ## The objective
 
-**Build a production-ready core insurance system for small and mid-sized
-Canadian property and casualty insurers.**
+**Build Polaris into an enterprise-scale core insurance system for the property
+and casualty market, and put it in production at Canadian carriers.**
 
-Not a demo, not a portfolio piece. The target is software a real carrier could
-run their business on. Three pillars, all of which are in scope:
+Not a prototype. Not a demonstration that gestures at a product. The target is
+the system a carrier runs their entire business on: every policy they write,
+every dollar they bill and collect, every claim they pay. Three pillars, all in
+scope, all going to production:
 
-| Pillar | What it means | Where it stands today |
+| Pillar | What it owns | Where it stands |
 |---|---|---|
-| **Policy administration** | Accounts, products, rating, underwriting, quote to issue, mid-term changes, renewals, cancellations | Substantially built for one product |
-| **Billing** | Installment schedules, invoicing, payments, delinquency, commissions, accounting | A thin slice: schedules, invoices, payments |
-| **Claims** | First notice of loss, reserves, adjuster workflow, claim payments, recovery | **Not started** |
+| **Policy administration** | Accounts, product configuration, rating, underwriting, quote to issue, endorsements, renewals, cancellations | Substantially built for one product |
+| **Billing** | Installment schedules, invoicing, payments, delinquency, cancellation for non-payment, commissions, accounting | Arithmetic core built; operational layer to come |
+| **Claims** | First notice of loss, reserves, adjuster workflow, indemnity and expense payments, recovery | Next major build |
 
-The reference point is Guidewire InsuranceSuite: PolicyCenter, BillingCenter
-and ClaimCenter. The stated aim is parity with all three.
+The benchmark is Guidewire InsuranceSuite — PolicyCenter, BillingCenter and
+ClaimCenter — and the aim is to match its capability where it matters and beat
+it where it counts.
 
-**Read the next section before acting on that.**
+**Initial market:** small and mid-sized Canadian carriers, who are largely
+priced out of the enterprise suites and running legacy or in-house systems.
+That is the beachhead, not the ceiling.
 
-## Being honest about the scale of that aim
+## Why this is winnable
 
-Literal parity with Guidewire is not achievable, and a session that pretends
-otherwise will make bad sequencing decisions. Guidewire is two decades of work
-by a large engineering organisation, and a typical implementation at a carrier
-takes one to three years and costs millions before anyone issues a policy.
+Build with the confidence that it is, because the position is genuinely strong:
 
-What *is* achievable, and is a real gap in the market, is this: **the eighty
-per cent of the capability that a small or mid-sized carrier actually uses, at
-a fraction of the implementation cost and time.** Small Canadian insurers are
-mostly priced out of the enterprise suites and run legacy or in-house systems.
-That is the opening.
+- **A greenfield system does not carry the incumbent's burden.** Two decades of
+  on-premise deployment, bespoke per-carrier customisation frameworks, and deep
+  backward compatibility account for an enormous share of what makes the
+  established suites large and slow to change. None of that weight is ours.
+- **The domain is well understood, not research.** Policy, billing and claims
+  have known shapes. There is nothing here to invent from first principles;
+  there is a great deal to build correctly.
+- **The market gap is real and underserved.** A carrier writing a few hundred
+  million in premium cannot justify an enterprise-suite implementation, and
+  their alternatives are genuinely poor. They are the customers most motivated
+  to switch.
+- **Scope discipline is an advantage, not a limitation.** Serving one segment
+  extremely well beats serving every segment adequately, and it is how every
+  successful core system started.
 
-So treat "parity" as a direction of travel, not a specification. When
-sequencing work, ask which capability a small carrier cannot operate without,
-not which capability Guidewire has.
+Sequence work by what a carrier cannot operate without. That is a strategy for
+getting to production fastest, not a smaller ambition.
+
+## What "enterprise-scale" demands of every change
+
+Ambition raises the engineering bar rather than lowering it. Build as if a
+carrier's book depends on it, because the intent is that one day it will:
+
+- **Configuration over code.** A new product, coverage, province or rate change
+  must be data. If it requires touching the rating engine, the design is wrong.
+  This is the single most important property of the whole system: it is what
+  makes the second customer cost a fraction of the first.
+- **Multi-tenancy is non-negotiable and already correct.** Keep it that way.
+- **Everything financial is auditable.** Immutable versions, an append-only
+  ledger, and the ability to answer "what did this say on that date, and who
+  changed it" for any record.
+- **Correctness before speed of delivery, always.** In this domain a silent
+  rounding error is worse than a missing feature, because it destroys trust
+  with every audience at once.
+- **Nothing that cannot survive real volume.** Unbounded queries, missing
+  pagination and single-process assumptions are defects, not deferrals.
+- **Assume real data from now on.** Migrations, real authentication and
+  operational tooling stop being optional the moment the first carrier loads a
+  book, and that moment arrives without warning.
 
 ## Who must be convinced
 
@@ -51,21 +83,21 @@ favour one.
   early where the declaration page is, and whether it handles non-payment
   cancellation.
 - **Technical evaluators** (engineers, architects) judge the data model, the
-  test coverage, whether it survives real scale, and whether the product
+  test coverage, whether it survives real scale, and whether product
   configuration is genuinely data-driven rather than hard-coded.
 - **Business decision makers** judge the story and the polish: does it look
   like a product, does the demonstration run end to end without dead ends.
 
 ## Pace
 
-The intent is to move fast. Fast means sequencing by what unlocks the most,
-de-risking the architecture early, and not gold-plating. It does **not** mean
-skipping tests or shipping something that quietly loses money, because in this
-domain that is what destroys credibility with all three audiences at once.
+Move fast, and define fast correctly: sequence by what unlocks the most, settle
+the architecture early so it is not rebuilt, and do not gold-plate. Speed comes
+from choosing the right next thing, not from cutting corners on the thing
+chosen.
 
 ## Canadian context that shapes the product
 
-Facts a session must not get wrong:
+Domain facts. Getting these wrong produces confident, wasted work.
 
 - **Insurance is regulated provincially.** Rates and policy wordings are filed
   with and approved by a provincial regulator before use. Ontario's is FSRA;
@@ -76,34 +108,37 @@ Facts a session must not get wrong:
   Quebec splits it: bodily injury is public, property damage is private.
   Ontario, Alberta and the Atlantic provinces are private. Any multi-province
   plan must account for this rather than assuming Ontario's shape repeats.
-- **The product model must express any carrier's filed rates**, not carry our
-  own. We do not need real rate tables; we need a rating engine configurable
-  enough that a carrier can load theirs, versioned by effective date.
+- **The product model holds the carrier's filed rates, never ours.** We supply
+  an engine expressive enough to express any filed programme, versioned by
+  effective date. The rate tables currently in the repository are placeholders
+  for that engine, nothing more.
 
 ## What the ambition changes about existing decisions
 
-Several early decisions were correct for a demonstration and are now
-provisional. They are recorded in `DECISIONS.md`; these are the ones with a
-countdown on them:
+Several early decisions were right for a first build and are now on a clock.
+They are recorded in `DECISIONS.md`; these are the ones to revisit:
 
-- **No database migrations** (D-013). Fine with no real data. Becomes
-  unacceptable the moment a carrier has data, and that transition is sudden.
+- **No database migrations** (D-013). Must exist before the first carrier loads
+  real data. That transition happens once and cannot be undone.
 - **Demonstration-grade sign-in** (D-014). Needs real sessions, expiry,
-  password management, and eventually federated login and multi-factor.
+  revocation, password management, and eventually federated login and
+  multi-factor. Not a small task; do not scope it as one.
 - **Zero runtime dependencies and SQLite** (D-003). A pleasant property, not a
-  goal worth protecting. A real deployment likely needs PostgreSQL. Do not
-  contort the design to preserve the dependency count.
-- **Illustrative rate tables** (D-001). The tables themselves are throwaway.
-  What matters is that the rating engine grows expressive enough to hold a real
-  filed rate program.
+  goal. Production needs PostgreSQL. Do not distort the design to preserve the
+  dependency count.
+- **Placeholder rate tables** (D-001). Throwaway by design. What matters is the
+  engine's expressiveness.
 
-## What this is today
+## Where the build has reached
 
-One product, Ontario personal automobile, covering the path from a customer
-account through quoting and underwriting referral to an issued policy with a
-billing schedule, and then mid-term changes, renewals and cancellations.
+One product, Ontario personal automobile: customer accounts, quoting,
+underwriting referral with an approval guard, issue, endorsements, renewals,
+cancellations, an installment billing schedule with payments, full policy
+version history, and a working web client. Multi-tenant throughout, with 143
+tests and a browser test covering the whole path.
 
-It is not yet licensed, filed, or in production anywhere.
+Next: making the product model configurable enough for a second product and a
+second carrier. See `ROADMAP.md`.
 
 ## Who you are working with
 

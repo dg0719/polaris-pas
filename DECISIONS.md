@@ -19,7 +19,8 @@ system for small and mid-sized Canadian property and casualty insurers,
 covering policy administration, billing **and claims**, aiming at parity with
 Guidewire InsuranceSuite, moving fast.
 
-**Recorded because** the first session inferred a much smaller goal. `PRODUCT.md`
+**Recorded because** the first session inferred a far smaller goal and built to
+it. `PRODUCT.md`
 had carried an invented purpose statement — that the system replaced "a
 mainframe screen and a spreadsheet" — which no one had ever said. It was
 written to give the interface design a point of view, and it went unchallenged
@@ -36,8 +37,9 @@ rationale and leave it in a file where a later session will read it as fact.**
 - D-013 (no migrations), D-014 (demonstration sign-in) and D-003 (zero runtime
   dependencies, SQLite) are now provisional. Each has a moment where it becomes
   unacceptable, listed in `ROADMAP.md`.
-- Literal Guidewire parity is not achievable and should not be planned for.
-  `CLAUDE.md` says why, and what to aim at instead.
+- The benchmark is Guidewire InsuranceSuite, matching its capability where it
+  matters and beating it where it counts. Small and mid-sized Canadian carriers
+  are the beachhead, not the ceiling.
 
 **Audience:** insurance people, technical evaluators and business buyers all
 have to be convinced. None of the three can be systematically neglected.

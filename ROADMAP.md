@@ -1,11 +1,11 @@
 # Roadmap
 
 Where Polaris is going, and in what order. See `CLAUDE.md` for the objective
-and an honest assessment of the ambition.
+and what enterprise scale demands of every change.
 
-This is a sequencing document, not a schedule. It has no dates on it because
-inventing dates would be fiction. What it does say is **what unlocks what**,
-so work is not done in an order that has to be redone.
+This is a sequencing document, not a schedule. What it says is **what unlocks
+what**, so the fastest path to production is taken and nothing is built in an
+order that forces it to be rebuilt.
 
 ---
 
@@ -86,9 +86,10 @@ Untouched, and roughly the size of the policy pillar. The core model:
 - **Adjuster workflow.** Assignment, diary, status, and the equivalent of the
   referral guard for authority limits: an adjuster cannot pay above their limit.
 
-**Why third:** it is the least coupled to what exists, so it is the safest thing
-to defer, and it benefits most from the patterns already proven in policy — the
-state machine, the append-only history, the authority guard.
+**Why third:** it is the least coupled to what exists, and it benefits most from
+the patterns already proven in policy — the state machine, the append-only
+history, the authority guard. Building it after those are settled means building
+it once.
 
 ---
 
@@ -108,14 +109,19 @@ at a specific moment, and the moment tends to arrive suddenly.
 
 ---
 
-## What is deliberately not on this list
+## Later, and deliberately not now
 
-- **A rules engine, workflow designer, or configuration user interface.**
-  Guidewire has these and they are enormous. Configuration as data files, edited
-  by whoever implements the carrier, is sufficient for a long time.
-- **Portals for brokers and policyholders.** Real demand, but they are additional
-  surfaces on top of a core that is not finished.
-- **Reinsurance, catastrophe modelling, actuarial reserving.** Adjacent systems,
-  not core policy administration.
-- **Real filed rates.** We supply the engine; the carrier supplies the rates.
-  See `DECISIONS.md` D-001.
+In scope for the product, sequenced behind the three pillars. Listed so nobody
+mistakes their absence for a decision against them.
+
+- **Configuration user interface, rules engine, workflow designer.** How a
+  carrier configures products without an engineer. Significant competitive
+  ground, and the thing that turns each new customer from a project into a
+  setup. Comes once the configuration model itself is proven by a second
+  product.
+- **Broker and policyholder portals.** Real demand, and the natural surface
+  expansion once the core is complete.
+- **Reinsurance, catastrophe exposure, actuarial reserving.** Adjacent systems
+  a carrier needs. Integrate before building.
+- **Real filed rates.** Never ours to supply. We build the engine; the carrier
+  loads their programme. See `DECISIONS.md` D-001.

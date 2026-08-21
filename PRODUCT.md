@@ -16,7 +16,7 @@ As billing and claims arrive, the billing clerk and the adjuster become primary 
 
 ## Product Purpose
 
-A production-ready core insurance system for small and mid-sized Canadian property and casualty insurers, covering all three operational pillars: policy administration, billing, and claims. The reference point is Guidewire InsuranceSuite; the opening is that small carriers are priced out of the enterprise suites and run legacy or in-house systems instead.
+An enterprise-scale core insurance system for the property and casualty market, covering all three operational pillars: policy administration, billing, and claims. The benchmark is Guidewire InsuranceSuite, matching its capability where it matters and beating it where it counts. Small and mid-sized Canadian carriers are the beachhead — underserved, motivated to switch — not the ceiling.
 
 Ontario personal auto is the first product, not the point. The point is a product model expressive enough to hold any carrier's filed programme, so the same system can be sold to the next carrier without being rewritten.
 
