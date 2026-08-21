@@ -134,8 +134,15 @@ apps/web           React + Vite client, hand-written CSS
   e2e/smoke.mjs      Browser test of the whole path
 ```
 
-Design context lives in [PRODUCT.md](PRODUCT.md) (who it is for, principles) and
-[DESIGN.md](DESIGN.md) (the visual system).
+Project context lives in four files, and they are meant to be read before changing
+anything:
+
+| File | Answers |
+|---|---|
+| [CLAUDE.md](CLAUDE.md) | How to work on this: invariants, conventions, what to ask before doing |
+| [DECISIONS.md](DECISIONS.md) | Why it is shaped this way, and what was rejected |
+| [PRODUCT.md](PRODUCT.md) | Who it is for and the principles behind it |
+| [DESIGN.md](DESIGN.md) | The visual system |
 
 ## Core model
 
