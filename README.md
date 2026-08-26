@@ -108,6 +108,17 @@ The seed builds a book with every state an underwriter actually meets:
 | Joanne Whitefeather | Cancelled mid-term, left holding a refund credit |
 | Priya Raghunathan | Submission still in draft |
 
+And three claims on that book:
+
+| Claim | Situation |
+|---|---|
+| Marguerite Hale, collision | Open: reserves set, one payment issued, an $18,000 payment **waiting on the supervisor**, an open subrogation, overdue diary |
+| Daniel Okonkwo, theft | Closed: paid at actual cash value with supervisor approval, salvage recovered |
+| Léa Arsenault, vandalism | Open and **flagged**: reported months late, loss days after inception |
+
+Sign in as `adjuster` / `polaris` for the working view or `supervisor` / `polaris`
+to approve the waiting payment.
+
 Northstar Mutual is a second tenant with its own book, so isolation is visible.
 
 ## Layout
@@ -120,6 +131,8 @@ packages/domain    Pure domain logic — no I/O, no framework
   stateMachine.ts    Uniform job lifecycle with role and referral guards
   proration.ts       Term, mid-term delta and cancellation refund maths
   billing.ts         Installment schedules and premium re-spreading
+  claims/            Coverage-in-force, claim financials, claim state machines,
+                     payment authority, fraud rules
 
 apps/api           HTTP API — node:http + node:sqlite, zero runtime dependencies
   db.ts              Schema, versioning and transactions
@@ -129,12 +142,15 @@ apps/api           HTTP API — node:http + node:sqlite, zero runtime dependenci
   issue.ts           Issuance: policy version + transaction + billing, atomically
   billing.ts         Schedule generation, reconciliation, payments
   worklist.ts        The underwriter's queue
+  claims/            FNOL, claim lifecycle, reserves, payments, recovery, diary,
+                     the claims worklist
   routes/            Router, DTOs and error mapping
 
 apps/web           React + Vite client, hand-written CSS
   styles/            Design tokens and components (see DESIGN.md)
-  routes/            Worklist, accounts, account file, wizard, job, policy
-  e2e/smoke.mjs      Browser test of the whole path
+  routes/            Worklist, accounts, account file, wizard, job, policy,
+                     claims worklist, claim file, FNOL wizard
+  e2e/               Browser tests: the policy path and the claims path
 ```
 
 Project context lives in four files, and they are meant to be read before changing
@@ -229,6 +245,17 @@ The client owns every other path.
 | POST | `/jobs/:id/bind`, `/issue`, `/withdraw` | |
 | GET | `/policies?accountId=`, `/policies/:id`, `/policies/:id/billing` | |
 | POST | `/policies/:id/changes`, `/renewal`, `/cancellation` | → 201 |
+| GET | `/claims?status=&policyId=&accountId=&adjuster=` | with financials per claim |
+| GET | `/claims/queues` | approvals, my claims, unassigned, diary, flagged |
+| GET | `/claims/:id` | the whole claim file |
+| POST | `/claims` | first notice of loss → 201; refused if no coverage in force |
+| POST | `/claims/:id/assign`, `/close`, `/reopen`, `/notes` | claims roles |
+| POST | `/claims/:id/exposures`, `/exposures/:eid/close`, `/reopen`, `/reserves` | |
+| POST | `/claims/:id/payments`, `/payments/:pid/approve`, `/reject`, `/issue`, `/void` | authority-gated |
+| POST | `/claims/:id/recoveries`, `/recoveries/:rid/receive`, `/close` | |
+| POST | `/claims/:id/tasks`, `/tasks/:tid/complete` | diary |
+| GET | `/policies/:id/coverage-at?date=` | drives the FNOL coverage step |
+| GET | `/claims-users` | assignable claims staff with authority limits |
 | GET | `/demo/credentials` | only when `POLARIS_DEMO=1` |
 
 Errors are `{ "error": { "code", "message" } }` with `400` validation or rating, `401` auth,
@@ -236,10 +263,13 @@ Errors are `{ "error": { "code", "message" } }` with `400` validation or rating,
 
 ## Known gaps
 
-Honest list of what a production PAS has that this does not: no product versioning by
+Honest list of what a production system has that this does not: no product versioning by
 effective date, no document generation, no delinquency or non-payment cancellation, no
 external data (VIN decode, MVR, CLEAR), territory is the first letter of the postal code,
-`Expired` is never set because nothing runs on a schedule, and no pagination.
+`Expired` is never set because nothing runs on a schedule, and no pagination. In claims:
+no litigation tracking, no catastrophe coding, no reinsurance recovery, no claim
+documents, fraud indicators are simple comparisons rather than scoring, and coverage
+limits are shown but not enforced against cumulative payments.
 
 **Authentication is a demo, not a security boundary.** Passwords are stored as scrypt
 hashes with a per-user salt and the failure message does not reveal whether the username

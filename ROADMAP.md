@@ -19,8 +19,8 @@ pillar only needs to be *good enough* before the next one starts, not finished.
 
 | | Policy administration | Billing | Claims |
 |---|---|---|---|
-| **Now** | One product, quote to issue, endorsements, renewals, cancellations, referrals | Schedules, invoices, payments, reconciliation | Nothing |
-| **Needed for a first carrier** | Multi-product, effective-dated rates, documents, forms | Delinquency, non-payment cancellation, commissions | First notice of loss, reserves, claim payments |
+| **Now** | One product, quote to issue, endorsements, renewals, cancellations, referrals | Schedules, invoices, payments, reconciliation | FNOL, exposures, reserves, payments with authority, recovery, diary, fraud flags |
+| **Needed for a first carrier** | Multi-product, effective-dated rates, documents, forms | Delinquency, non-payment cancellation, commissions | ~~First notice of loss, reserves, claim payments~~ built |
 | **Needed to compete** | Configuration without code, multi-province, portals | Agency bill, trust accounting, general ledger export | Adjuster workload, litigation, recovery, fraud flags |
 
 ---
@@ -73,7 +73,21 @@ and it is what a carrier's finance function will interrogate hardest.
 
 ## Stage 3 · Claims
 
-Untouched, and roughly the size of the policy pillar. The core model:
+**Built ahead of Stages 1 and 2** (August 2026). Claims was the least coupled
+pillar and reused patterns already settled in policy — the state machine, the
+append-only history, the authority guard — so building it out of order forced
+no rebuilds. The cost is real and acknowledged: the second product (Stage 1)
+and operational billing (Stage 2) stay undone longer.
+
+What exists: first notice of loss verified against the coverage in force on
+the loss date, exposures per coverage per claimant, append-only reserve
+movements, indemnity and expense payments behind a per-adjuster authority
+limit with second-person approval, subrogation, salvage and deductible
+recovery, an adjuster diary and worklist, and fraud indicators as product
+configuration. Still open within claims: litigation, catastrophe coding,
+reinsurance recoveries, and claims documents.
+
+The core model as originally planned:
 
 - **First notice of loss.** Intake against a policy, at a date, verified against
   the coverage in force *on that date* — which is exactly why immutable policy

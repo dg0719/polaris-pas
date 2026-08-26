@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { request, useMutation, useQuery } from '../lib/api.ts';
-import { claimantKindLabel, date, money, todayIso } from '../lib/format.ts';
+import { claimantKindLabel, date, money, todayIso, transactionLabel } from '../lib/format.ts';
 import { Link, useRouter } from '../lib/router.tsx';
 import type {
   Claim,
@@ -221,7 +221,8 @@ export function Fnol({ policyId }: { policyId: string }) {
                     <Status value="InForce" label="In force" />
                   </Fact>
                   <Fact label="Version">
-                    {coverage.data.version.versionNumber} ({coverage.data.version.transactionType})
+                    {coverage.data.version.versionNumber} (
+                    {transactionLabel(coverage.data.version.transactionType)})
                   </Fact>
                   <Fact label="Term">
                     {date(coverage.data.version.termStart)} →{' '}

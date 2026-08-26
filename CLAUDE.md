@@ -134,8 +134,14 @@ They are recorded in `DECISIONS.md`; these are the ones to revisit:
 One product, Ontario personal automobile: customer accounts, quoting,
 underwriting referral with an approval guard, issue, endorsements, renewals,
 cancellations, an installment billing schedule with payments, full policy
-version history, and a working web client. Multi-tenant throughout, with 143
-tests and a browser test covering the whole path.
+version history, and a working web client. Claims is built ahead of the
+roadmap's order: first notice of loss verified against the coverage in force
+on the loss date, exposures per coverage per claimant, append-only reserve
+movements, payments behind a personal authority limit with second-person
+approval, subrogation and salvage recovery, an adjuster diary and worklist,
+and fraud indicators as product configuration. Five roles: CSR, underwriter,
+adjuster, claims supervisor, admin. Multi-tenant throughout, with 233 tests
+and two browser tests covering the policy path and the claims path.
 
 Next: making the product model configurable enough for a second product and a
 second carrier. See `ROADMAP.md`.
@@ -190,6 +196,17 @@ not, add the test rather than relying on care.
    to more than one carrier.
 10. **The API answers under `/api`.** The web client owns every other path. They
    collide otherwise: `/accounts` is both an API resource and a screen.
+11. **Claim financials are append-only movements.** The reserve on an exposure
+   is the sum of its signed movement rows. Nothing edits or deletes a
+   movement; a correction is a new movement with a reason.
+12. **Claims money never touches the premium ledger.** Reserves, claim
+   payments and recoveries live in the claims tables. The billing invariant
+   (4) is a statement about premium only, and a deductible recovery is a
+   claim recovery record, never an invoice.
+13. **No claim payment is issued above the actor's authority without a second
+   person.** Every user carries a payment authority limit in cents; a payment
+   above the requester's limit needs approval from someone else whose own
+   limit covers it, and nobody approves their own payment.
 
 ## Conventions
 

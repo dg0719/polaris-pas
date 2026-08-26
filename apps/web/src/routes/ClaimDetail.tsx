@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { request, useMutation, useQuery } from '../lib/api.ts';
-import { date, dateTime, lossCauseLabel, money } from '../lib/format.ts';
+import { date, dateTime, lossCauseLabel, money, transactionLabel } from '../lib/format.ts';
 import { Link } from '../lib/router.tsx';
 import type { ClaimPage, ClaimsUser } from '../lib/types.ts';
 import {
@@ -132,7 +132,7 @@ export function ClaimDetail({ claimId }: { claimId: string }) {
             title="Coverage in force on the loss date"
             note={
               data.policyVersion
-                ? `Version ${data.policyVersion.versionNumber} (${data.policyVersion.transactionType}), effective ${date(data.policyVersion.effectiveDate)}, term ${date(data.policyVersion.termStart)} → ${date(data.policyVersion.termEnd)}.`
+                ? `Version ${data.policyVersion.versionNumber} (${transactionLabel(data.policyVersion.transactionType)}), effective ${date(data.policyVersion.effectiveDate)}, term ${date(data.policyVersion.termStart)} → ${date(data.policyVersion.termEnd)}.`
                 : undefined
             }
           >

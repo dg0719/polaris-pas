@@ -67,12 +67,14 @@ export function postReserve(db: Db, ctx: TenantCtx, claimId: string, input: Rese
       amountCents: input.amountCents,
       reason: input.reason,
     });
+    const MONEY = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' });
+    const signed = `${input.amountCents > 0 ? '+' : '−'}${MONEY.format(Math.abs(input.amountCents) / 100)}`;
     repo.appendClaimEvent(db, ctx, {
       claimId,
       action: 'reserveMoved',
       subjectKind: 'exposure',
       subjectId: input.exposureId,
-      detail: `${input.category} ${input.amountCents > 0 ? '+' : ''}${input.amountCents} — ${input.reason}`,
+      detail: `${input.category} ${signed} — ${input.reason}`,
     });
   });
 }
