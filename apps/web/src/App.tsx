@@ -14,6 +14,7 @@ import { Policies } from './routes/Policies.tsx';
 import { PolicyDetail } from './routes/PolicyDetail.tsx';
 import { SignIn } from './routes/SignIn.tsx';
 import { SubmissionWizard } from './routes/SubmissionWizard.tsx';
+import { Team } from './routes/Team.tsx';
 import { Worklist } from './routes/Worklist.tsx';
 import { useSession } from './session.tsx';
 
@@ -25,6 +26,7 @@ export function App() {
 
 function SignedIn() {
   const { path } = useRouter();
+  const { session } = useSession();
   const worklist = useQuery<WorklistData>('/worklist');
   const claims = useQuery<ClaimsWorklistData>('/claims/queues');
 
@@ -37,6 +39,7 @@ function SignedIn() {
     { to: '/accounts', label: 'Accounts' },
     { to: '/policies', label: 'Policies' },
     { to: '/claims', label: 'Claims', count: claimsCount, flagged: true },
+    ...(session?.role === 'admin' ? [{ to: '/team', label: 'Team' }] : []),
   ];
 
   return <AppShell nav={nav}>{renderRoute(path)}</AppShell>;
@@ -48,6 +51,7 @@ function renderRoute(path: string) {
   if (path === '/accounts/new') return <NewAccount />;
   if (path === '/policies') return <Policies />;
   if (path === '/claims') return <ClaimsWorklist />;
+  if (path === '/team') return <Team />;
 
   const submission = matchPath('/accounts/:id/new-submission', path);
   if (submission) return <SubmissionWizard accountId={submission['id']!} />;

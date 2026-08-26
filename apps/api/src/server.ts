@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { bootstrapIfEmpty } from './bootstrap.ts';
 import { openDb } from './db.ts';
 import { createApp } from './routes.ts';
 import { staticSite } from './static.ts';
@@ -9,6 +10,7 @@ function log(message: string): void {
 
 const port = Number(process.env.PORT ?? 3000);
 const db = openDb();
+bootstrapIfEmpty(db);
 
 // Serving the client is opt-out: if a build exists, one process hosts
 // everything. In development Vite serves the client instead.

@@ -29,8 +29,12 @@ const WHATS_HERE = [
     detail: 'Schedules, invoices and payments that re-spread when the premium moves.',
   },
   {
-    term: 'Two tenants',
-    detail: 'Acme and Northstar share the deployment and can see nothing of each other.',
+    term: 'Claims',
+    detail: 'Losses verified against the coverage in force on the loss date, reserves, payments with authority limits, recovery.',
+  },
+  {
+    term: 'Multi-tenant',
+    detail: 'Carriers sharing a deployment can see nothing of each other.',
   },
 ];
 

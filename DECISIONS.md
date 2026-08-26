@@ -422,3 +422,31 @@ and reseeded, and anything typed into them is gone.
 **Recorded because** it is the largest schema change so far and the kind of
 change that stops being acceptable the moment a carrier loads real data. The
 migrations countdown in D-013 is now shorter, not longer.
+
+---
+
+## D-022 · The product ships empty; demo data lives only in the tests
+
+**2026-08-26**
+
+There is no seed command. On its first start against an empty database the
+server creates one carrier (name and prefix from `POLARIS_CARRIER_NAME` /
+`POLARIS_CARRIER_PREFIX`) and one sign-in per role, prints the credentials
+once, and stops there. The book of business begins empty; an existing
+database is never touched, so everything entered through the screens persists
+until someone deletes the file. Admins create further sign-ins from the Team
+screen. The invented book — the fake customers, policies and claims — moved
+to `apps/api/tests/e2eSeed.ts`, where only the browser tests build it, on
+scratch databases.
+
+**Instead of:** `npm run seed` being the assumed starting point, which meant
+every fresh launch greeted its operator with invented policyholders.
+
+**Why:** a system pitched at real carriers must not blur the line between
+data someone entered and data a script invented. An empty first start makes
+what persists obvious, and keeps the demo names where they now belong: in
+test scaffolding that never touches a real database.
+
+**Deliberate residue:** the invented names still exist inside the test tree.
+Removing them from the tests too would be a large rewrite for no
+user-visible gain.

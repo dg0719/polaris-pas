@@ -102,7 +102,7 @@ let browser;
 try {
   process.stdout.write('seeding scratch database\n');
   await new Promise((resolve, reject) => {
-    const seed = run('node', ['--experimental-transform-types', 'apps/api/src/seed.ts'], {
+    const seed = run('node', ['--experimental-transform-types', 'apps/api/tests/e2eSeed.ts'], {
       POLARIS_DB: dbFile,
     });
     seed.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`seed exited ${code}`))));
