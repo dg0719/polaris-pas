@@ -10,11 +10,10 @@
   "scripts": {
     "build": "npm run build:web",
     "start": "node --experimental-transform-types apps/api/src/server.ts",
-    "seed": "node --experimental-transform-types apps/api/src/seed.ts",
     "dev:api": "node --experimental-transform-types apps/api/src/server.ts",
     "dev:web": "npm run dev -w apps/web",
     "test": "vitest run",
-    "test:e2e": "node apps/web/e2e/smoke.mjs",
+    "test:e2e": "node apps/web/e2e/smoke.mjs && node apps/web/e2e/claims.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p apps/web/tsconfig.json",
     "build:web": "npm run build -w @polaris/web"
   },

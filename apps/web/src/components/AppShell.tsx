@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link, useRouter } from '../lib/router.tsx';
 import { useSession } from '../session.tsx';
+import { roleLabel } from '../lib/format.ts';
 import { Button } from './ui.tsx';
 
 interface NavItem {
@@ -50,9 +51,7 @@ export function AppShell({ nav, children }: { nav: NavItem[]; children: ReactNod
         <div className="rail__foot">
           <div className="rail__user">
             <span>{session?.name}</span>
-            <span className="rail__role">
-              {session?.role === 'csr' ? 'CSR' : session?.role}
-            </span>
+            <span className="rail__role">{session ? roleLabel(session.role) : null}</span>
             {session?.tenantName ? (
               <span className="rail__tenant-name">{session.tenantName}</span>
             ) : null}

@@ -103,3 +103,32 @@ export function transactionLabel(type: string): string {
 export function kilometres(km: number): string {
   return `${new Intl.NumberFormat('en-CA').format(km)} km/yr`;
 }
+
+/** Loss causes are stored as codes; read them as words. */
+export function lossCauseLabel(code: string): string {
+  const words = code.toLowerCase().split('_').join(' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+export function claimantKindLabel(kind: string): string {
+  return kind === 'thirdParty' ? 'Third party' : 'Insured';
+}
+
+export function roleLabel(role: string): string {
+  if (role === 'csr') return 'CSR';
+  if (role === 'claims_supervisor') return 'Claims supervisor';
+  return role.charAt(0).toUpperCase() + role.slice(1);
+}
+
+export function recoveryTypeLabel(type: string): string {
+  if (type === 'subrogation') return 'Subrogation';
+  if (type === 'salvage') return 'Salvage';
+  if (type === 'deductible') return 'Deductible recovery';
+  return type;
+}
+
+export function payMethodLabel(method: string): string {
+  if (method === 'eft') return 'EFT';
+  if (method === 'cheque') return 'Cheque';
+  return method;
+}

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test } from 'vitest';
 import { authenticate } from '../src/auth.ts';
+import { reportClaim } from '../src/claims/fnol.ts';
+import { closeClaim } from '../src/claims/lifecycle.ts';
 import type { Db } from '../src/db.ts';
 import { ApiError } from '../src/errors.ts';
 import { issueJob } from '../src/issue.ts';
@@ -97,5 +99,53 @@ describe('tenant isolation', () => {
   test('an unknown API key is rejected', () => {
     const req = { headers: { authorization: 'Bearer nope' } };
     expect(() => authenticate(db, req as never)).toThrow(ApiError);
+  });
+});
+
+describe('tenant isolation: claims', () => {
+  function claimFor(ctx: TenantCtx) {
+    const issued = issueFor(ctx);
+    const adjusterCtx: TenantCtx = { ...ctx, role: 'adjuster' };
+    return reportClaim(db, adjusterCtx, {
+      policyId: issued.policy.id,
+      lossDate: '2026-10-01',
+      reportedDate: '2026-10-02',
+      lossCause: 'COLLISION',
+      description: 'Isolation test loss',
+    }).claim;
+  }
+
+  test('a claim and everything on it are invisible to another tenant', () => {
+    const claim = claimFor(acme);
+    expect(repo.getClaim(db, northstar, claim.id)).toBeNull();
+    expect(repo.listClaims(db, northstar)).toHaveLength(0);
+    expect(repo.listExposures(db, northstar, claim.id)).toHaveLength(0);
+    expect(repo.listReserveMovements(db, northstar, claim.id)).toHaveLength(0);
+    expect(repo.listClaimPayments(db, northstar, claim.id)).toHaveLength(0);
+    expect(repo.listClaimRecoveries(db, northstar, claim.id)).toHaveLength(0);
+    expect(repo.listClaimEvents(db, northstar, claim.id)).toHaveLength(0);
+    expect(repo.listClaimNotes(db, northstar, claim.id)).toHaveLength(0);
+    expect(repo.listClaimTasks(db, northstar, claim.id)).toHaveLength(0);
+    expect(repo.listPaymentsAwaitingApproval(db, northstar)).toHaveLength(0);
+  });
+
+  test('another tenant cannot act on a claim it does not own', () => {
+    const claim = claimFor(acme);
+    const northstarAdjuster: TenantCtx = { ...northstar, role: 'adjuster' };
+    expect(() => closeClaim(db, northstarAdjuster, claim.id)).toThrow(/not found/);
+    expect(() =>
+      reportClaim(db, northstarAdjuster, {
+        policyId: claim.policy_id,
+        lossDate: '2026-10-01',
+        reportedDate: '2026-10-02',
+        lossCause: 'COLLISION',
+        description: 'Cross-tenant attempt',
+      }),
+    ).toThrow(/not found/);
+  });
+
+  test('claim number sequences are independent per tenant', () => {
+    expect(claimFor(acme).claim_number).toBe('ACMEC-000001');
+    expect(claimFor(northstar).claim_number).toBe('NSTRC-000001');
   });
 });

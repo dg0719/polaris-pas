@@ -1,13 +1,12 @@
-import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import type { InstallmentPlan, RiskData, Role } from '@polaris/domain';
-import { createAccount } from './accounts.ts';
-import { recordPayment } from './billing.ts';
-import { addDays, addMonths, todayIso } from './dates.ts';
-import { openDb, type Db } from './db.ts';
-import { DEMO_ACCOUNTS, accountsForSecondTenant } from './demo.ts';
-import { hashPassword } from './passwords.ts';
-import { issueJob } from './issue.ts';
+import { bootstrapTenant } from '../src/bootstrap.ts';
+import { createAccount } from '../src/accounts.ts';
+import { recordPayment } from '../src/billing.ts';
+import { addDays, addMonths, todayIso } from '../src/dates.ts';
+import { openDb, type Db } from '../src/db.ts';
+import { DEFAULT_ACCOUNTS } from '../src/demo.ts';
+import { issueJob } from '../src/issue.ts';
 import {
   bindJob,
   createCancellation,
@@ -16,65 +15,34 @@ import {
   createSubmission,
   quoteJob,
   underwriteJob,
-} from './jobs.ts';
-import * as repo from './repo.ts';
-import type { AccountRow, TenantCtx } from './repo.ts';
-import { account, coverages, driver, risk, vehicle } from './seed/fixtures.ts';
+} from '../src/jobs.ts';
+import * as repo from '../src/repo.ts';
+import type { AccountRow, TenantCtx } from '../src/repo.ts';
+import { account, coverages, driver, risk, vehicle } from './fixtures.ts';
+import { reportClaim } from '../src/claims/fnol.ts';
+import { assignClaim, closeClaim, closeExposure } from '../src/claims/lifecycle.ts';
+import { approvePayment, issuePayment, requestPayment } from '../src/claims/payments.ts';
+import { openRecovery, receiveRecovery } from '../src/claims/recovery.ts';
+import { postReserve } from '../src/claims/reserves.ts';
+import { addTask } from '../src/claims/tasks.ts';
 
 /**
- * Development seed. Builds two tenants (proving isolation) and, for the first,
- * a book of business with every state an underwriter actually meets: referrals
- * waiting on a decision, an endorsed policy, an overdue account, a cancellation
- * with a refund, a renewal in progress and a half-finished draft.
- *
- * API keys are generated per run and printed. Nothing secret is committed.
+ * Browser-test fixture, NOT part of the product. The two e2e runs execute
+ * this against their own scratch databases to get a book with every state
+ * the screens must handle. Nothing here ever touches polaris.db, and no
+ * product command runs it: a real launch starts empty (see src/bootstrap.ts).
  */
 
 function log(message: string): void {
   process.stdout.write(`${message}\n`);
 }
 
-function apiKey(prefix: string): string {
-  return `${prefix}_${randomBytes(16).toString('hex')}`;
-}
-
-/**
- * One login per role. The primary tenant gets the advertised usernames
- * (`underwriter`, `csr`, `admin`); any further tenant gets suffixed ones so
- * usernames stay globally unique and isolation is still demonstrable.
- */
-export function seedTenant(
-  db: Db,
-  name: string,
-  prefix: string,
-  options: { usernameSuffix?: string } = {},
-): { tenantId: string; keys: Record<Role, string> } {
-  const tenant = repo.createTenant(db, name, prefix);
-  const accounts = options.usernameSuffix
-    ? accountsForSecondTenant(options.usernameSuffix)
-    : DEMO_ACCOUNTS;
-
-  const keys = {} as Record<Role, string>;
-  for (const account of accounts) {
-    const key = apiKey(prefix.toLowerCase());
-    const stored = hashPassword(account.password);
-    repo.createUser(db, tenant.id, {
-      username: account.username,
-      email: account.email,
-      name: account.name,
-      role: account.role,
-      passwordHash: stored.hash,
-      passwordSalt: stored.salt,
-      apiKey: key,
-    });
-    keys[account.role] = key;
-  }
-  return { tenantId: tenant.id, keys };
-}
 
 interface Ctxs {
   csr: TenantCtx;
   underwriter: TenantCtx;
+  adjuster: TenantCtx;
+  supervisor: TenantCtx;
 }
 
 function contexts(db: Db, keys: Record<Role, string>): Ctxs {
@@ -82,7 +50,12 @@ function contexts(db: Db, keys: Record<Role, string>): Ctxs {
     const user = repo.findUserByApiKey(db, keys[role])!;
     return { tenantId: user.tenant_id, userId: user.id, role };
   };
-  return { csr: resolve('csr'), underwriter: resolve('underwriter') };
+  return {
+    csr: resolve('csr'),
+    underwriter: resolve('underwriter'),
+    adjuster: resolve('adjuster'),
+    supervisor: resolve('claims_supervisor'),
+  };
 }
 
 // ─── Scenario helpers ───────────────────────────────────────────────────────
@@ -147,7 +120,13 @@ function backdate(db: Db, ctx: TenantCtx, accountId: string, isoDate: string): v
   );
 }
 
-function seedBook(db: Db, ctxs: Ctxs): void {
+interface SeededBook {
+  halePolicyId: string;
+  okonkwoPolicyId: string;
+  arsenaultPolicyId: string;
+}
+
+function seedBook(db: Db, ctxs: Ctxs): SeededBook {
   const { csr, underwriter } = ctxs;
   const today = todayIso();
   const monthsAgo = (n: number) => addMonths(today, -n);
@@ -348,7 +327,7 @@ function seedBook(db: Db, ctxs: Ctxs): void {
       postalCode: 'K6A 1A3',
     }),
   );
-  issuePolicy(
+  const arsenaultPolicy = issuePolicy(
     db,
     csr,
     arsenault,
@@ -429,14 +408,181 @@ function seedBook(db: Db, ctxs: Ctxs): void {
       coverages('v1'),
     ),
   );
+
+  return {
+    halePolicyId: halePolicy.policy.id,
+    okonkwoPolicyId: okonkwoPolicy.policy.id,
+    arsenaultPolicyId: arsenaultPolicy.policy.id,
+  };
+}
+
+// ─── Claims on the book ─────────────────────────────────────────────────────
+
+/**
+ * Claims in every state an adjuster actually meets: an open collision file
+ * mid-adjustment with a payment stuck above authority, a closed theft with
+ * salvage recovered, and a late-reported loss wearing fraud flags.
+ */
+function seedClaims(db: Db, ctxs: Ctxs, book: SeededBook): void {
+  const { adjuster, supervisor } = ctxs;
+  const today = todayIso();
+
+  // 1. Open collision on Hale's policy: three exposures, reserves set, one
+  //    payment issued within authority, one waiting on the supervisor, an
+  //    open subrogation, and an overdue diary.
+  const collision = reportClaim(db, adjuster, {
+    policyId: book.halePolicyId,
+    lossDate: addDays(today, -21),
+    reportedDate: addDays(today, -19),
+    lossCause: 'COLLISION',
+    description:
+      'Insured was rear-ended at Bank St and Riverside Dr, pushed into the vehicle ahead. ' +
+      'Rear and front damage; third party ahead claims bumper damage.',
+    lossLocation: 'Bank St & Riverside Dr, Ottawa',
+    exposures: [
+      { coverageCode: 'DCPD', riskItemId: 'v1' },
+      { coverageCode: 'COLL', riskItemId: 'v1' },
+      {
+        coverageCode: 'LIAB',
+        riskItemId: 'v1',
+        claimantName: 'Robert Chen',
+        claimantKind: 'thirdParty',
+      },
+    ],
+  });
+  assignClaim(db, supervisor, collision.claim.id, adjuster.userId);
+  const [dcpd, coll, liab] = collision.exposures;
+
+  postReserve(db, adjuster, collision.claim.id, {
+    exposureId: dcpd!.id,
+    category: 'indemnity',
+    amountCents: 420_000,
+    reason: 'Rear-end repair estimate from preferred shop',
+  });
+  postReserve(db, adjuster, collision.claim.id, {
+    exposureId: coll!.id,
+    category: 'indemnity',
+    amountCents: 680_000,
+    reason: 'Front-end damage from secondary impact',
+  });
+  postReserve(db, adjuster, collision.claim.id, {
+    exposureId: liab!.id,
+    category: 'indemnity',
+    amountCents: 2_500_000,
+    reason: 'Third-party bumper and possible soft-tissue exposure',
+  });
+  postReserve(db, adjuster, collision.claim.id, {
+    exposureId: liab!.id,
+    category: 'expense',
+    amountCents: 250_000,
+    reason: 'Independent appraisal and legal review',
+  });
+
+  // Within the adjuster's $10,000 authority: approved as requested, issued.
+  const collPayment = requestPayment(db, adjuster, collision.claim.id, {
+    exposureId: coll!.id,
+    category: 'indemnity',
+    amountCents: 560_000, // $5,600 gross; $1,000 deductible comes off
+    payeeName: 'Capital Collision Centre',
+    payeeKind: 'vendor',
+    method: 'eft',
+    memo: 'Front-end repair per estimate CC-2214',
+  });
+  issuePayment(db, adjuster, collision.claim.id, collPayment.id);
+
+  // Above authority: waits in the supervisor's queue. This is the demo's
+  // standing example of the second-person gate.
+  requestPayment(db, adjuster, collision.claim.id, {
+    exposureId: liab!.id,
+    category: 'indemnity',
+    amountCents: 1_800_000, // $18,000 > the adjuster's $10,000
+    payeeName: 'Robert Chen',
+    payeeKind: 'claimant',
+    method: 'cheque',
+    memo: 'Third-party settlement per signed release',
+  });
+
+  openRecovery(db, adjuster, collision.claim.id, {
+    exposureId: dcpd!.id,
+    recoveryType: 'subrogation',
+    category: 'indemnity',
+    counterparty: "At-fault driver's insurer",
+    expectedCents: 420_000,
+  });
+
+  addTask(db, adjuster, collision.claim.id, {
+    subject: 'Request the police report',
+    dueDate: addDays(today, -5),
+  });
+  addTask(db, adjuster, collision.claim.id, {
+    subject: 'Follow up on third-party medical records',
+    dueDate: addDays(today, -2),
+  });
+
+  // 2. Closed theft on Okonkwo's policy: paid above authority with a
+  //    supervisor approval, salvage recovered, everything closed.
+  const theft = reportClaim(db, adjuster, {
+    policyId: book.okonkwoPolicyId,
+    lossDate: addDays(today, -60),
+    reportedDate: addDays(today, -59),
+    lossCause: 'THEFT',
+    description: 'Vehicle stolen overnight from a condominium garage; recovered burnt out.',
+    lossLocation: 'Queens Quay W, Toronto',
+    exposures: [{ coverageCode: 'COMP', riskItemId: 'v1' }],
+  });
+  assignClaim(db, supervisor, theft.claim.id, adjuster.userId);
+  const comp = theft.exposures[0]!;
+
+  postReserve(db, adjuster, theft.claim.id, {
+    exposureId: comp.id,
+    category: 'indemnity',
+    amountCents: 1_400_000,
+    reason: 'Actual cash value less anticipated salvage',
+  });
+  const theftPayment = requestPayment(db, adjuster, theft.claim.id, {
+    exposureId: comp.id,
+    category: 'indemnity',
+    amountCents: 1_400_000, // $14,000 gross; net $13,000 needs the supervisor
+    payeeName: 'Daniel Okonkwo',
+    payeeKind: 'insured',
+    method: 'eft',
+    memo: 'Total loss settlement at ACV',
+  });
+  approvePayment(db, supervisor, theft.claim.id, theftPayment.id, 'ACV supported by valuation');
+  issuePayment(db, adjuster, theft.claim.id, theftPayment.id);
+
+  const salvage = openRecovery(db, adjuster, theft.claim.id, {
+    exposureId: comp.id,
+    recoveryType: 'salvage',
+    category: 'indemnity',
+    counterparty: 'Impact Auto Auctions',
+    expectedCents: 260_000,
+  });
+  receiveRecovery(db, adjuster, theft.claim.id, salvage.id, 260_000);
+  closeExposure(db, adjuster, theft.claim.id, comp.id);
+  closeClaim(db, adjuster, theft.claim.id);
+
+  // 3. A loss five days after inception, reported months later: both fraud
+  //    indicators trip, and the claim waits unassigned in the flagged queue.
+  reportClaim(db, adjuster, {
+    policyId: book.arsenaultPolicyId,
+    lossDate: addDays(addMonths(today, -3), 5),
+    reportedDate: today,
+    lossCause: 'VANDALISM',
+    description: 'Deep scratches along both doors, reported long after the stated loss date.',
+    lossLocation: 'Rue Principale, Hawkesbury',
+    exposures: [{ coverageCode: 'COMP', riskItemId: 'v1' }],
+  });
 }
 
 function main(): void {
   const db = openDb();
-  const acme = seedTenant(db, 'Acme Insurance', 'ACME');
-  const northstar = seedTenant(db, 'Northstar Mutual', 'NSTR', { usernameSuffix: 'northstar' });
+  const acme = bootstrapTenant(db, 'Acme Insurance', 'ACME');
+  const northstar = bootstrapTenant(db, 'Northstar Mutual', 'NSTR', { usernameSuffix: 'northstar' });
 
-  seedBook(db, contexts(db, acme.keys));
+  const acmeCtxs = contexts(db, acme.keys);
+  const book = seedBook(db, acmeCtxs);
+  seedClaims(db, acmeCtxs, book);
 
   // A second tenant with its own book, so isolation is visible in the demo.
   const nstr = contexts(db, northstar.keys);
@@ -466,8 +612,8 @@ function main(): void {
   );
 
   log('Sign in with:');
-  for (const account of DEMO_ACCOUNTS) {
-    log(`  ${account.role.padEnd(12)} ${account.username.padEnd(14)} ${account.password}`);
+  for (const account of DEFAULT_ACCOUNTS) {
+    log(`  ${account.role.padEnd(18)} ${account.username.padEnd(14)} ${account.password}`);
   }
   log(`
 Acme Insurance   ${acme.tenantId}`);
@@ -477,7 +623,8 @@ Acme Insurance   ${acme.tenantId}`);
   log(
     `\nAcme book: ${repo.listAccounts(db, csr).length} accounts, ` +
       `${repo.listPolicies(db, csr).length} policies, ` +
-      `${repo.listJobs(db, csr).length} jobs.`,
+      `${repo.listJobs(db, csr).length} jobs, ` +
+      `${repo.listClaims(db, csr).length} claims.`,
   );
   db.close();
 }

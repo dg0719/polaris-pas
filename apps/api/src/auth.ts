@@ -38,7 +38,7 @@ export function authenticate(db: Db, req: IncomingMessage): { ctx: TenantCtx; us
 
 export interface SignInResult {
   token: string;
-  user: { name: string; role: Role; tenantName: string };
+  user: { id: string; name: string; role: Role; tenantName: string };
 }
 
 /**
@@ -62,6 +62,7 @@ export function signIn(db: Db, username: unknown, password: unknown): SignInResu
   return {
     token: user.api_key,
     user: {
+      id: user.id,
       name: user.name,
       role: user.role,
       tenantName: tenantName(db, user.tenant_id),

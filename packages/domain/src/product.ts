@@ -167,4 +167,92 @@ export const ontarioAutoV1: ProductDefinition = {
       unit: 'money',
     },
   ],
+  // Causes of loss and the coverages that can respond to each. Order within
+  // coverageCodes is the order exposures are offered at first notice of loss.
+  lossCauses: [
+    {
+      code: 'COLLISION',
+      name: 'Collision',
+      coverageCodes: ['COLL', 'DCPD', 'LIAB', 'AB'],
+      claimantKinds: ['insured', 'thirdParty'],
+    },
+    {
+      code: 'THEFT',
+      name: 'Theft',
+      coverageCodes: ['COMP'],
+      claimantKinds: ['insured'],
+    },
+    {
+      code: 'FIRE',
+      name: 'Fire',
+      coverageCodes: ['COMP'],
+      claimantKinds: ['insured'],
+    },
+    {
+      code: 'HAIL',
+      name: 'Hail or windstorm',
+      coverageCodes: ['COMP'],
+      claimantKinds: ['insured'],
+    },
+    {
+      code: 'VANDALISM',
+      name: 'Vandalism',
+      coverageCodes: ['COMP'],
+      claimantKinds: ['insured'],
+    },
+    {
+      code: 'GLASS',
+      name: 'Glass breakage',
+      coverageCodes: ['COMP'],
+      claimantKinds: ['insured'],
+    },
+    {
+      code: 'BODILY_INJURY',
+      name: 'Bodily injury',
+      coverageCodes: ['AB', 'LIAB'],
+      claimantKinds: ['insured', 'thirdParty'],
+    },
+    {
+      code: 'UNINSURED',
+      name: 'Uninsured or unidentified motorist',
+      coverageCodes: ['UA'],
+      claimantKinds: ['insured'],
+    },
+  ],
+  // Fraud indicators evaluated at first notice of loss. Indicators only:
+  // they ask an adjuster to look, they decide nothing.
+  fraudRules: [
+    {
+      code: 'FR-LATE',
+      description: 'Loss reported more than 30 days after it happened',
+      field: 'daysToReport',
+      op: 'gt',
+      value: 30,
+      valueLabel: 'days after the loss',
+    },
+    {
+      code: 'FR-NEWPOLICY',
+      description: 'Loss within 14 days of the term starting',
+      field: 'daysSinceInception',
+      op: 'lt',
+      value: 14,
+      valueLabel: 'days after inception',
+    },
+    {
+      code: 'FR-POSTCANCEL',
+      description: 'Loss date falls after the policy was cancelled',
+      field: 'daysSinceCancellation',
+      op: 'gte',
+      value: 0,
+      valueLabel: 'days after cancellation',
+    },
+    {
+      code: 'FR-HISTORY',
+      description: 'Drivers of record carry 3 or more prior at-fault claims',
+      field: 'priorAtFaultClaims',
+      op: 'gte',
+      value: 3,
+      valueLabel: 'prior at-fault claims',
+    },
+  ],
 };

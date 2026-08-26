@@ -1,5 +1,5 @@
 import type { CoverageSelection, Driver, RiskData, Vehicle } from '@polaris/domain';
-import type { AccountInput } from '../repo.ts';
+import type { AccountInput } from '../src/repo.ts';
 
 /** Demo fixtures. Names, VINs and licence numbers are invented. */
 

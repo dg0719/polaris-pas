@@ -245,3 +245,31 @@ export function parsePaymentInput(value: unknown): {
     receivedAt: isoDate(obj, 'receivedAt', 'payment'),
   };
 }
+
+// ─── Claims validators ──────────────────────────────────────────────────────
+
+/** A whole (possibly negative) number of cents, e.g. a reserve movement. */
+export function requireCentsDelta(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw ApiError.badRequest(`${field} must be a whole number of cents`);
+  }
+  return value;
+}
+
+/** A strictly positive whole number of cents. */
+export function requirePositiveCents(value: unknown, field: string): number {
+  const cents = requireCentsDelta(value, field);
+  if (cents <= 0) throw ApiError.badRequest(`${field} must be greater than zero`);
+  return cents;
+}
+
+export function requireOneOf<T extends string>(
+  value: unknown,
+  field: string,
+  options: readonly T[],
+): T {
+  if (typeof value !== 'string' || !(options as readonly string[]).includes(value)) {
+    throw ApiError.badRequest(`${field} must be one of: ${options.join(', ')}`);
+  }
+  return value as T;
+}

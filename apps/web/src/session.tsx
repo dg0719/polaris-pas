@@ -4,6 +4,7 @@ import type { Role } from './lib/types.ts';
 
 export interface Session {
   apiKey: string;
+  userId: string;
   name: string;
   role: Role;
   tenantName: string;

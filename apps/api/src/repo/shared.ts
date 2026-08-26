@@ -29,8 +29,10 @@ export interface TenantRow {
   id: string;
   name: string;
   policy_prefix: string;
+  claim_prefix: string;
   next_policy_seq: number;
   next_account_seq: number;
+  next_claim_seq: number;
   created_at: string;
 }
 
@@ -44,6 +46,7 @@ export interface UserRow {
   password_hash: string;
   password_salt: string;
   api_key: string;
+  authority_limit_cents: number;
   created_at: string;
 }
 
@@ -184,4 +187,127 @@ export function one<T>(row: unknown): T | null {
 
 export function many<T>(rows: unknown[]): T[] {
   return rows as T[];
+}
+
+// ─── Claims rows ────────────────────────────────────────────────────────────
+
+export interface ClaimRow {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  policy_id: string;
+  policy_version_id: string;
+  claim_number: string;
+  status: 'Open' | 'Closed';
+  loss_date: string;
+  reported_date: string;
+  loss_cause: string;
+  description: string;
+  loss_location: string | null;
+  assigned_user_id: string | null;
+  fraud_flags_json: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ClaimExposureRow {
+  id: string;
+  tenant_id: string;
+  claim_id: string;
+  coverage_code: string;
+  coverage_name: string;
+  risk_item_id: string | null;
+  risk_item_label: string | null;
+  claimant_name: string;
+  claimant_kind: 'insured' | 'thirdParty';
+  deductible_cents: number;
+  status: 'Open' | 'Closed';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReserveMovementRow {
+  id: string;
+  tenant_id: string;
+  claim_id: string;
+  exposure_id: string;
+  category: 'indemnity' | 'expense';
+  amount_cents: number;
+  reason: string;
+  actor_user_id: string;
+  created_at: string;
+}
+
+export interface ClaimPaymentRow {
+  id: string;
+  tenant_id: string;
+  claim_id: string;
+  exposure_id: string;
+  category: 'indemnity' | 'expense';
+  amount_cents: number;
+  deductible_applied_cents: number;
+  payee_name: string;
+  payee_kind: 'insured' | 'claimant' | 'vendor' | 'other';
+  method: 'cheque' | 'eft';
+  memo: string | null;
+  status: 'Requested' | 'Approved' | 'Issued' | 'Rejected' | 'Voided';
+  requested_by: string;
+  approved_by: string | null;
+  decision_note: string | null;
+  issued_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ClaimRecoveryRow {
+  id: string;
+  tenant_id: string;
+  claim_id: string;
+  exposure_id: string;
+  recovery_type: 'subrogation' | 'salvage' | 'deductible';
+  category: 'indemnity' | 'expense';
+  counterparty: string;
+  expected_cents: number;
+  received_cents: number;
+  status: 'Open' | 'Recovered' | 'Closed';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ClaimEventRow {
+  id: string;
+  tenant_id: string;
+  claim_id: string;
+  action: string;
+  subject_kind: string;
+  subject_id: string;
+  detail: string | null;
+  actor_user_id: string;
+  actor_role: string;
+  actor_name: string | null;
+  created_at: string;
+}
+
+export interface ClaimNoteRow {
+  id: string;
+  tenant_id: string;
+  claim_id: string;
+  body: string;
+  author_user_id: string;
+  author_name: string | null;
+  created_at: string;
+}
+
+export interface ClaimTaskRow {
+  id: string;
+  tenant_id: string;
+  claim_id: string;
+  subject: string;
+  due_date: string;
+  assigned_user_id: string;
+  status: 'open' | 'done';
+  created_by: string;
+  created_at: string;
+  updated_at: string;
 }

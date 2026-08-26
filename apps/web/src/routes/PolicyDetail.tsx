@@ -4,6 +4,7 @@ import {
   date,
   jobTypeLabel,
   money,
+  lossCauseLabel,
   planLabel,
   planName,
   todayIso,
@@ -12,6 +13,7 @@ import {
 import { Link, useRouter } from '../lib/router.tsx';
 import type {
   Account,
+  ClaimSummary,
   Invoice,
   Job,
   LedgerTransaction,
@@ -87,8 +89,13 @@ export function PolicyDetail({ policyId }: { policyId: string }) {
           ) : null
         }
         actions={
-          inForce ? (
+          policy ? (
             <>
+              <Button variant="secondary" onClick={() => navigate(`/policies/${policyId}/fnol`)}>
+                Report a claim
+              </Button>
+              {inForce ? (
+                <>
               <Button
                 variant="secondary"
                 onClick={() => setServicing(servicing === 'renewal' ? null : 'renewal')}
@@ -103,6 +110,8 @@ export function PolicyDetail({ policyId }: { policyId: string }) {
               >
                 Cancel policy
               </Button>
+                </>
+              ) : null}
             </>
           ) : null
         }
@@ -245,6 +254,8 @@ export function PolicyDetail({ policyId }: { policyId: string }) {
           </table>
         </div>
       </Section>
+
+      <PolicyClaims policyId={policyId} />
 
       <Section title="Versions" note="Each issued transaction leaves a snapshot that is never edited.">
         <div className="table-wrap">
@@ -422,5 +433,48 @@ function ServicingForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+function PolicyClaims({ policyId }: { policyId: string }) {
+  const claims = useQuery<{ claims: ClaimSummary[] }>(`/claims?policyId=${policyId}`);
+  if (!claims.data || claims.data.claims.length === 0) return null;
+  return (
+    <Section title="Claims" note="Losses reported against this policy.">
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th scope="col">Claim</th>
+              <th scope="col">Loss date</th>
+              <th scope="col">Cause</th>
+              <th scope="col">Status</th>
+              <th scope="col" className="num">
+                Incurred
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {claims.data.claims.map((claim) => (
+              <tr key={claim.id}>
+                <td>
+                  <Link to={`/claims/${claim.id}`} className="link mono">
+                    {claim.claimNumber}
+                  </Link>
+                </td>
+                <td className="date">{date(claim.lossDate)}</td>
+                <td>{lossCauseLabel(claim.lossCause)}</td>
+                <td>
+                  <Status value={claim.status} />
+                </td>
+                <td className="num">
+                  <Money cents={claim.incurredCents} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Section>
   );
 }

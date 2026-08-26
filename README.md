@@ -27,7 +27,6 @@ Two ways. **One process, as you would deploy it:**
 ```bash
 npm ci
 npm run build                # builds the web client
-npm run seed                 # creates polaris.db and a book of business
 npm start                    # everything on http://localhost:3000
 ```
 
@@ -38,30 +37,33 @@ path, so there is nothing else to run and no CORS to configure.
 
 ```bash
 npm ci
-npm run seed
 npm run dev:api              # terminal 1 — API on :3000
 npm run dev:web              # terminal 2 — UI on :5173
 ```
 
-Open http://localhost:5173 and sign in. There is one login per role:
+On its very first start against an empty database, the server creates your
+carrier and one sign-in per role, prints them to the console, and stops there:
+**the book of business starts empty**. Everything in it is entered by a person
+and saved permanently in `polaris.db` — delete that file to start over.
 
 | Role | Username | Password |
 |---|---|---|
-| Underwriter | `underwriter` | `polaris` |
 | CSR | `csr` | `polaris` |
+| Underwriter | `underwriter` | `polaris` |
+| Adjuster | `adjuster` | `polaris` |
+| Claims supervisor | `supervisor` | `polaris` |
 | Admin | `admin` | `polaris` |
 
 The referral queue belongs to the underwriter; a CSR can quote and bind but cannot accept a
-referred risk. `POLARIS_DEMO=1` (already set by `dev:api`) is what prints those credentials
-under the sign-in form; without it the form still works, it just advertises nothing.
-
-Northstar Mutual, the second tenant, has the same three roles with `.northstar` appended to
-the username. They are deliberately not advertised.
+referred risk; claim payments above an adjuster's authority wait for the supervisor. The
+admin's **Team** screen creates further sign-ins and resets passwords. Setting
+`POLARIS_DEMO=1` prints the default credentials under the sign-in form; without it the form
+advertises nothing.
 
 | Command | What it does |
 |---|---|
-| `npm test` | 143 unit and integration tests |
-| `npm run test:e2e` | browser smoke test of the full path, on its own scratch database |
+| `npm test` | 246 unit and integration tests |
+| `npm run test:e2e` | two browser tests (policy path, claims path) on scratch databases |
 | `npm run typecheck` | both TypeScript projects |
 | `npm run build:web` | production build of the client |
 
@@ -71,7 +73,9 @@ Every setting has a working default; see [.env.example](.env.example).
 
 | Variable | Default | What it does |
 |---|---|---|
-| `POLARIS_DB` | `polaris.db` | SQLite file. Created by `npm run seed`. |
+| `POLARIS_DB` | `polaris.db` | SQLite file. Created on first start. |
+| `POLARIS_CARRIER_NAME` | `Polaris Insurance` | Carrier created on first start. |
+| `POLARIS_CARRIER_PREFIX` | `POL` | Policy/claim number prefix for that carrier. |
 | `PORT` | `3000` | Port the server listens on. |
 | `POLARIS_DEMO` | unset | `1` prints the demo logins on the sign-in screen. Leave unset in a real deployment. |
 | `POLARIS_WEB_DIR` | `apps/web/dist` | Where the built client lives. |
@@ -84,8 +88,8 @@ The whole app is one Node process and one file on disk:
 
 ```bash
 git clone <this repo> && cd polaris-pas
-npm ci && npm run build && npm run seed
-POLARIS_DEMO=1 PORT=8080 npm start
+npm ci && npm run build
+PORT=8080 npm start
 ```
 
 Behind a reverse proxy, forward everything to that port; the app needs no path
@@ -93,22 +97,16 @@ rewriting. To persist data across deploys, point `POLARIS_DB` at a file on a
 mounted volume. There is no migration path between schema versions yet, so a
 schema change means reseeding.
 
-## What the demo contains
+## First start
 
-The seed builds a book with every state an underwriter actually meets:
+The product ships **empty**. On the first run against a fresh database the
+server creates one carrier (name and prefix configurable, see above) and the
+five default sign-ins, and nothing else — no accounts, no policies, no claims.
+The invented book of business that earlier versions seeded now exists only
+inside the automated tests, which build it on throwaway scratch databases.
 
-| Account | Situation |
-|---|---|
-| Marguerite Hale | Healthy monthly policy, paid up to date, renewal already quoted |
-| Daniel Okonkwo | Endorsed mid-term (second vehicle added), one installment overdue |
-| Sophie Tremblay | **Referred** — two at-fault claims |
-| Bergström Family Trust | **Referred** — new driver on a $164,000 vehicle |
-| Chidi Nkemdirim | Referral already accepted, clear to bind |
-| Léa Arsenault | Three months in, one payment made, past due |
-| Joanne Whitefeather | Cancelled mid-term, left holding a refund credit |
-| Priya Raghunathan | Submission still in draft |
-
-Northstar Mutual is a second tenant with its own book, so isolation is visible.
+To reset everything: stop the server, delete `polaris.db` (and its `-shm` /
+`-wal` companions), and start again.
 
 ## Layout
 
@@ -120,6 +118,8 @@ packages/domain    Pure domain logic — no I/O, no framework
   stateMachine.ts    Uniform job lifecycle with role and referral guards
   proration.ts       Term, mid-term delta and cancellation refund maths
   billing.ts         Installment schedules and premium re-spreading
+  claims/            Coverage-in-force, claim financials, claim state machines,
+                     payment authority, fraud rules
 
 apps/api           HTTP API — node:http + node:sqlite, zero runtime dependencies
   db.ts              Schema, versioning and transactions
@@ -129,12 +129,16 @@ apps/api           HTTP API — node:http + node:sqlite, zero runtime dependenci
   issue.ts           Issuance: policy version + transaction + billing, atomically
   billing.ts         Schedule generation, reconciliation, payments
   worklist.ts        The underwriter's queue
+  claims/            FNOL, claim lifecycle, reserves, payments, recovery, diary,
+                     the claims worklist
   routes/            Router, DTOs and error mapping
 
 apps/web           React + Vite client, hand-written CSS
   styles/            Design tokens and components (see DESIGN.md)
-  routes/            Worklist, accounts, account file, wizard, job, policy
-  e2e/smoke.mjs      Browser test of the whole path
+  routes/            Worklist, accounts, account file, wizard, job, policy,
+                     claims worklist, claim file, FNOL wizard
+  e2e/               Browser tests: the policy path and the claims path
+                     (their book of test data comes from apps/api/tests/e2eSeed.ts)
 ```
 
 Project context lives in four files, and they are meant to be read before changing
@@ -229,6 +233,20 @@ The client owns every other path.
 | POST | `/jobs/:id/bind`, `/issue`, `/withdraw` | |
 | GET | `/policies?accountId=`, `/policies/:id`, `/policies/:id/billing` | |
 | POST | `/policies/:id/changes`, `/renewal`, `/cancellation` | → 201 |
+| GET | `/claims?status=&policyId=&accountId=&adjuster=` | with financials per claim |
+| GET | `/claims/queues` | approvals, my claims, unassigned, diary, flagged |
+| GET | `/claims/:id` | the whole claim file |
+| POST | `/claims` | first notice of loss → 201; refused if no coverage in force |
+| POST | `/claims/:id/assign`, `/close`, `/reopen`, `/notes` | claims roles |
+| POST | `/claims/:id/exposures`, `/exposures/:eid/close`, `/reopen`, `/reserves` | |
+| POST | `/claims/:id/payments`, `/payments/:pid/approve`, `/reject`, `/issue`, `/void` | authority-gated |
+| POST | `/claims/:id/recoveries`, `/recoveries/:rid/receive`, `/close` | |
+| POST | `/claims/:id/tasks`, `/tasks/:tid/complete` | diary |
+| GET | `/policies/:id/coverage-at?date=` | drives the FNOL coverage step |
+| GET | `/claims-users` | assignable claims staff with authority limits |
+| GET | `/users` | the team, admin only |
+| POST | `/users` | create a sign-in, admin only → 201 |
+| POST | `/users/:id/password` | reset a password, admin only |
 | GET | `/demo/credentials` | only when `POLARIS_DEMO=1` |
 
 Errors are `{ "error": { "code", "message" } }` with `400` validation or rating, `401` auth,
@@ -236,10 +254,13 @@ Errors are `{ "error": { "code", "message" } }` with `400` validation or rating,
 
 ## Known gaps
 
-Honest list of what a production PAS has that this does not: no product versioning by
+Honest list of what a production system has that this does not: no product versioning by
 effective date, no document generation, no delinquency or non-payment cancellation, no
 external data (VIN decode, MVR, CLEAR), territory is the first letter of the postal code,
-`Expired` is never set because nothing runs on a schedule, and no pagination.
+`Expired` is never set because nothing runs on a schedule, and no pagination. In claims:
+no litigation tracking, no catastrophe coding, no reinsurance recovery, no claim
+documents, fraud indicators are simple comparisons rather than scoring, and coverage
+limits are shown but not enforced against cumulative payments.
 
 **Authentication is a demo, not a security boundary.** Passwords are stored as scrypt
 hashes with a per-user salt and the failure message does not reveal whether the username

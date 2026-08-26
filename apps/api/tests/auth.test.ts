@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { signIn } from '../src/auth.ts';
 import type { Db } from '../src/db.ts';
-import { DEMO_ACCOUNTS } from '../src/demo.ts';
+import { DEFAULT_ACCOUNTS } from '../src/demo.ts';
 import { ApiError } from '../src/errors.ts';
 import { hashPassword, verifyPassword } from '../src/passwords.ts';
 import { createApp } from '../src/routes.ts';
@@ -62,7 +62,7 @@ describe('password storage', () => {
 
 describe('signing in', () => {
   test('every seeded role can sign in', () => {
-    for (const account of DEMO_ACCOUNTS) {
+    for (const account of DEFAULT_ACCOUNTS) {
       const result = signIn(db, account.username, account.password);
       expect(result.user.role).toBe(account.role);
       expect(result.user.tenantName).toBe('Acme Insurance');

@@ -114,3 +114,8 @@ textarea {
 .skip-link:focus {
   top: var(--s-4);
 }
+
+/* Secondary text inside a table cell or meta row. */
+.dim {
+  color: var(--ink-3);
+}

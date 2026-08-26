@@ -332,3 +332,121 @@ resolved it.
 
 **Recorded because** the failure message ("Failed to load url sqlite") gives no
 hint of the cause, and someone will otherwise lose an hour to it.
+
+---
+
+## D-017 · Claims money never touches the premium ledger
+
+**2026-08-26**
+
+Claim reserves, payments and recoveries live in their own tables
+(`claim_reserve_movements`, `claim_payments`, `claim_recoveries`) and are
+summed by pure domain arithmetic. The billing invariant —
+`sum(non-void invoice amounts) === sum(transaction amounts)` — remains a
+statement about premium only.
+
+**Instead of:** writing claim payments into the premium ledger as negative
+transactions or invoices.
+
+**Why:** premium and losses are different books answering different questions.
+A carrier's finance function reconciles written premium against receivables;
+its claims function reconciles incurred against paid and recovered. Mixing
+them makes both reconciliations wrong. Deductible recovery is a claim
+recovery record, not an invoice.
+
+---
+
+## D-018 · Reserves move by appending signed deltas, never by edit
+
+**2026-08-26**
+
+The current reserve on an exposure is the sum of its movement rows. There is
+no "set the reserve" write anywhere; a correction is a new movement with a
+reason, and closing an exposure appends the offsetting movement rather than
+touching history.
+
+**Instead of:** a mutable `reserve_cents` column updated in place.
+
+**Why:** reserve history is what an auditor and an actuary both read — how the
+estimate developed matters as much as where it ended. An overwrite destroys
+exactly that. This mirrors the append-only policy versions decision (D-005).
+
+---
+
+## D-019 · Payment authority is a personal limit on the user record
+
+**2026-08-26**
+
+Every user carries `authority_limit_cents`. A claim payment within the
+requester's own limit is authorized as it is requested; one above it waits in
+`Requested` until a second person — whose own limit covers it — approves.
+Nobody approves their own payment. Only `Approved` payments can be `Issued`.
+
+**Instead of:** role-based approval (any supervisor approves anything) or no
+gate at all.
+
+**Why:** this is how carriers actually delegate: authority is granted per
+adjuster, in dollars, and revised as they gain experience. The guard is the
+same shape as the underwriting referral guard — the system never blocks the
+request, only the money leaving without the right approval.
+
+---
+
+## D-020 · Loss causes and fraud indicators are product configuration
+
+**2026-08-26**
+
+Which causes of loss exist, which coverages respond to each, who can claim
+under them, and which fraud indicators fire are all data on the product
+definition (`lossCauses`, `fraudRules`), read by a claims engine that knows
+nothing about automobiles.
+
+**Instead of:** hard-coding "collision pays under COLL" in the claims service.
+
+**Why:** invariant 9 — a second product must not require touching engine code.
+A habitational product will bring water damage and fire with different
+responding coverages; that must be a data change. Fraud rules follow the same
+rule-as-data shape as underwriting referral rules.
+
+---
+
+## D-021 · Schema v4: claims tables, claims roles, one more reseed
+
+**2026-08-26**
+
+Eight claims tables, `claim_prefix`/`next_claim_seq` on tenants, two new
+roles (`adjuster`, `claims_supervisor`) and `authority_limit_cents` on users.
+Under D-013 there is no migration path: existing databases must be deleted
+and reseeded, and anything typed into them is gone.
+
+**Recorded because** it is the largest schema change so far and the kind of
+change that stops being acceptable the moment a carrier loads real data. The
+migrations countdown in D-013 is now shorter, not longer.
+
+---
+
+## D-022 · The product ships empty; demo data lives only in the tests
+
+**2026-08-26**
+
+There is no seed command. On its first start against an empty database the
+server creates one carrier (name and prefix from `POLARIS_CARRIER_NAME` /
+`POLARIS_CARRIER_PREFIX`) and one sign-in per role, prints the credentials
+once, and stops there. The book of business begins empty; an existing
+database is never touched, so everything entered through the screens persists
+until someone deletes the file. Admins create further sign-ins from the Team
+screen. The invented book — the fake customers, policies and claims — moved
+to `apps/api/tests/e2eSeed.ts`, where only the browser tests build it, on
+scratch databases.
+
+**Instead of:** `npm run seed` being the assumed starting point, which meant
+every fresh launch greeted its operator with invented policyholders.
+
+**Why:** a system pitched at real carriers must not blur the line between
+data someone entered and data a script invented. An empty first start makes
+what persists obvious, and keeps the demo names where they now belong: in
+test scaffolding that never touches a real database.
+
+**Deliberate residue:** the invented names still exist inside the test tree.
+Removing them from the tests too would be a large rewrite for no
+user-visible gain.
