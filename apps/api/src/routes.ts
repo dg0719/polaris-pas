@@ -6,6 +6,7 @@ import { registerClaimRoutes } from './routes/claims.ts';
 import { registerJobRoutes } from './routes/jobs.ts';
 import { registerDemoRoutes, registerMetaRoutes } from './routes/meta.ts';
 import { registerPolicyRoutes } from './routes/policies.ts';
+import { registerUserRoutes } from './routes/users.ts';
 import type { StaticSite } from './static.ts';
 
 export function buildRouter(db: Db): Router {
@@ -16,6 +17,7 @@ export function buildRouter(db: Db): Router {
   registerJobRoutes(router, db);
   registerPolicyRoutes(router, db);
   registerClaimRoutes(router, db);
+  registerUserRoutes(router, db);
   return router;
 }
 

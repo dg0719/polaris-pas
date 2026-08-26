@@ -3,7 +3,7 @@ import { createAccount } from '../src/accounts.ts';
 import { openDb, type Db } from '../src/db.ts';
 import * as repo from '../src/repo.ts';
 import type { AccountRow, TenantCtx } from '../src/repo.ts';
-import { seedTenant } from '../src/seed.ts';
+import { bootstrapTenant } from '../src/bootstrap.ts';
 
 export interface TestTenant {
   tenantId: string;
@@ -20,7 +20,7 @@ export function testDb(): Db {
  * hold the plain `underwriter` / `csr` / `admin` logins.
  */
 export function makeTenant(db: Db, name = 'Acme Insurance', prefix = 'ACME'): TestTenant {
-  const seeded = seedTenant(db, name, prefix, {
+  const seeded = bootstrapTenant(db, name, prefix, {
     ...(prefix === 'ACME' ? {} : { usernameSuffix: prefix.toLowerCase() }),
   });
   const ctx = {} as Record<Role, TenantCtx>;

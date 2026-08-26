@@ -140,8 +140,11 @@ on the loss date, exposures per coverage per claimant, append-only reserve
 movements, payments behind a personal authority limit with second-person
 approval, subrogation and salvage recovery, an adjuster diary and worklist,
 and fraud indicators as product configuration. Five roles: CSR, underwriter,
-adjuster, claims supervisor, admin. Multi-tenant throughout, with 233 tests
-and two browser tests covering the policy path and the claims path.
+adjuster, claims supervisor, admin, plus an admin Team screen that creates
+sign-ins and resets passwords. The product ships empty: first start
+bootstraps one carrier and the default sign-ins, and every piece of business
+data is entered by a person. Multi-tenant throughout, with 246 tests and two
+browser tests covering the policy path and the claims path.
 
 Next: making the product model configurable enough for a second product and a
 second carrier. See `ROADMAP.md`.
@@ -274,6 +277,10 @@ apps/web            The interface. Screens, design tokens, a small router.
 apps/web/e2e        The browser test that drives the whole path.
 ```
 
-Run `npm run seed` to build a demo book of business: referrals waiting on an
-underwriter, an endorsed policy, an overdue account, a cancellation with a
-refund. It is curated deliberately, so keep it that way when changing it.
+The product ships empty. On first start against a fresh database the server
+creates one carrier and the five default sign-ins (`bootstrap.ts`) and
+nothing else; every account, policy and claim is entered by a person. There
+is no seed command. The invented book of business lives only in
+`apps/api/tests/e2eSeed.ts`, where the two browser tests build it on scratch
+databases — it is curated deliberately, so keep it that way when changing it,
+and never wire it back into the product.

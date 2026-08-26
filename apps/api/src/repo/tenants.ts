@@ -136,3 +136,21 @@ export function listUsersByRole(db: Db, ctx: TenantCtx, roles: Role[]): UserRow[
       .all(ctx.tenantId, ...roles),
   );
 }
+
+/** Everyone in the caller's tenant, for the admin Team screen. */
+export function listUsers(db: Db, ctx: TenantCtx): UserRow[] {
+  return many<UserRow>(
+    db.prepare('SELECT * FROM users WHERE tenant_id = ? ORDER BY name').all(ctx.tenantId),
+  );
+}
+
+export function updateUserPassword(
+  db: Db,
+  ctx: TenantCtx,
+  userId: string,
+  stored: { hash: string; salt: string },
+): void {
+  db.prepare(
+    'UPDATE users SET password_hash = ?, password_salt = ? WHERE tenant_id = ? AND id = ?',
+  ).run(stored.hash, stored.salt, ctx.tenantId, userId);
+}
