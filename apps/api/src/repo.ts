@@ -8,3 +8,6 @@ export * from './repo/accounts.ts';
 export * from './repo/policies.ts';
 export * from './repo/jobs.ts';
 export * from './repo/ledger.ts';
+export * from './repo/claims.ts';
+export * from './repo/claimMoney.ts';
+export * from './repo/claimTasks.ts';

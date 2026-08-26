@@ -15,6 +15,8 @@ export interface DemoAccount {
   name: string;
   email: string;
   role: Role;
+  /** Claim payment authority in cents; 0 for roles that never pay claims. */
+  authorityLimitCents: number;
 }
 
 const PASSWORD = 'polaris';
@@ -26,6 +28,7 @@ export const DEMO_ACCOUNTS: DemoAccount[] = [
     name: 'Uma Wright',
     email: 'uma.wright@example.com',
     role: 'underwriter',
+    authorityLimitCents: 0,
   },
   {
     username: 'csr',
@@ -33,6 +36,23 @@ export const DEMO_ACCOUNTS: DemoAccount[] = [
     name: 'Casey Reid',
     email: 'casey.reid@example.com',
     role: 'csr',
+    authorityLimitCents: 0,
+  },
+  {
+    username: 'adjuster',
+    password: PASSWORD,
+    name: 'Ana Diaz',
+    email: 'ana.diaz@example.com',
+    role: 'adjuster',
+    authorityLimitCents: 1_000_000, // $10,000
+  },
+  {
+    username: 'supervisor',
+    password: PASSWORD,
+    name: 'Sam Osei',
+    email: 'sam.osei@example.com',
+    role: 'claims_supervisor',
+    authorityLimitCents: 10_000_000, // $100,000
   },
   {
     username: 'admin',
@@ -40,6 +60,7 @@ export const DEMO_ACCOUNTS: DemoAccount[] = [
     name: 'Ade Mina',
     email: 'ade.mina@example.com',
     role: 'admin',
+    authorityLimitCents: 25_000_000, // $250,000
   },
 ];
 

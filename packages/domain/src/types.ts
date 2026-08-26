@@ -1,6 +1,13 @@
+import type { ClaimantKind, FraudSubject } from './claims/types.ts';
+
 // ─── Core domain types (pure, dependency-free) ───────────────────────────────
 
-export type Role = 'csr' | 'underwriter' | 'admin';
+export type Role =
+  | 'csr'
+  | 'underwriter'
+  | 'adjuster'
+  | 'claims_supervisor'
+  | 'admin';
 
 export type JobType = 'Submission' | 'PolicyChange' | 'Renewal' | 'Cancellation';
 
@@ -80,6 +87,34 @@ export interface FactorTable {
   [key: string]: number;
 }
 
+/**
+ * A cause of loss the product recognises, and the coverages that can respond
+ * to it. Claims reads this instead of hard-coding which coverage pays for what,
+ * so a new product brings its own causes without touching the claims engine.
+ */
+export interface LossCauseDef {
+  code: string;
+  name: string;
+  /** Coverage codes that may respond. Order is the order exposures are offered. */
+  coverageCodes: string[];
+  /** Who can claim under this cause. */
+  claimantKinds: ClaimantKind[];
+}
+
+/**
+ * A fraud indicator, evaluated at first notice of loss. Same rule-as-data shape
+ * as `UwRule`, against the derived facts in `FraudSubject`.
+ */
+export interface FraudRuleDef {
+  code: string;
+  description: string;
+  field: keyof FraudSubject;
+  op: 'gt' | 'gte' | 'lt' | 'lte' | 'eq';
+  value: number;
+  /** Noun for the value, e.g. "days after the loss". */
+  valueLabel?: string;
+}
+
 export interface UwRule {
   code: string;
   description: string;
@@ -112,6 +147,10 @@ export interface ProductDefinition {
     deductibleFactor: FactorTable; // deductible (cents as string) → factor
   };
   uwRules: UwRule[];
+  /** Causes of loss and the coverages that respond to each. */
+  lossCauses: LossCauseDef[];
+  /** Fraud indicators evaluated at first notice of loss. */
+  fraudRules: FraudRuleDef[];
 }
 
 // ─── Quote result ────────────────────────────────────────────────────────────

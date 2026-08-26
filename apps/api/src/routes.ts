@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Db } from './db.ts';
 import { HttpResult, Router, errorResponse, readJsonBody, sendJson } from './http.ts';
 import { registerAccountRoutes } from './routes/accounts.ts';
+import { registerClaimRoutes } from './routes/claims.ts';
 import { registerJobRoutes } from './routes/jobs.ts';
 import { registerDemoRoutes, registerMetaRoutes } from './routes/meta.ts';
 import { registerPolicyRoutes } from './routes/policies.ts';
@@ -14,6 +15,7 @@ export function buildRouter(db: Db): Router {
   registerAccountRoutes(router, db);
   registerJobRoutes(router, db);
   registerPolicyRoutes(router, db);
+  registerClaimRoutes(router, db);
   return router;
 }
 

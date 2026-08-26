@@ -66,6 +66,7 @@ export function seedTenant(
       passwordHash: stored.hash,
       passwordSalt: stored.salt,
       apiKey: key,
+      authorityLimitCents: account.authorityLimitCents,
     });
     keys[account.role] = key;
   }
