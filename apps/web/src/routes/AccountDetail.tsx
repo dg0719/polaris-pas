@@ -3,6 +3,7 @@ import { request, useMutation, useQuery } from '../lib/api.ts';
 import {
   date,
   jobTypeLabel,
+  lossCauseLabel,
   money,
   planName,
   relativeDays,
@@ -12,6 +13,7 @@ import { Link } from '../lib/router.tsx';
 import type {
   Account,
   AccountRollup,
+  ClaimSummary,
   Invoice,
   Job,
   Payment,
@@ -197,6 +199,8 @@ export function AccountDetail({ accountId }: { accountId: string }) {
           </div>
         )}
       </Section>
+
+      <AccountClaims accountId={accountId} />
 
       {openJobs.length > 0 ? (
         <Section title="Open work" note="Submissions, changes and renewals that are not yet issued.">
@@ -447,5 +451,50 @@ function RecordPayment({
         ) : null}
       </div>
     </form>
+  );
+}
+
+function AccountClaims({ accountId }: { accountId: string }) {
+  const claims = useQuery<{ claims: ClaimSummary[] }>(`/claims?accountId=${accountId}`);
+  if (!claims.data || claims.data.claims.length === 0) return null;
+  return (
+    <Section title="Claims" note="Losses reported across this account's policies.">
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th scope="col">Claim</th>
+              <th scope="col">Policy</th>
+              <th scope="col">Loss date</th>
+              <th scope="col">Cause</th>
+              <th scope="col">Status</th>
+              <th scope="col" className="num">
+                Incurred
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {claims.data.claims.map((claim) => (
+              <tr key={claim.id}>
+                <td>
+                  <Link to={`/claims/${claim.id}`} className="link mono">
+                    {claim.claimNumber}
+                  </Link>
+                </td>
+                <td className="mono">{claim.policyNumber}</td>
+                <td className="date">{date(claim.lossDate)}</td>
+                <td>{lossCauseLabel(claim.lossCause)}</td>
+                <td>
+                  <Status value={claim.status} />
+                </td>
+                <td className="num">
+                  <Money cents={claim.incurredCents} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Section>
   );
 }

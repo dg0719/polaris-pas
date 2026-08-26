@@ -48,9 +48,9 @@ export function Money({
 
 // ─── Status ─────────────────────────────────────────────────────────────────
 
-const FLAGGED = new Set(['Referred', 'referred', 'due']);
-const NEGATIVE = new Set(['Declined', 'Cancelled', 'Withdrawn', 'overdue', 'Expired']);
-const DONE = new Set(['Issued', 'InForce', 'paid', 'Bound', 'credit']);
+const FLAGGED = new Set(['Referred', 'referred', 'due', 'Requested']);
+const NEGATIVE = new Set(['Declined', 'Cancelled', 'Withdrawn', 'overdue', 'Expired', 'Rejected']);
+const DONE = new Set(['Issued', 'InForce', 'paid', 'Bound', 'credit', 'Approved', 'Recovered', 'done']);
 
 /** Status always reads as a word; colour is redundant reinforcement. */
 export function Status({ value, label }: { value: string; label?: string }) {
@@ -60,7 +60,7 @@ export function Status({ value, label }: { value: string; label?: string }) {
       ? ' status--negative'
       : DONE.has(value)
         ? ' status--done'
-        : value === 'void'
+        : value === 'void' || value === 'Voided'
           ? ' status--muted'
           : '';
   return <span className={`status${modifier}`}>{label ?? humanise(value)}</span>;

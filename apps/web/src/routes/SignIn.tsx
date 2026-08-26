@@ -1,17 +1,13 @@
 import { useState } from 'react';
 import { request, useMutation, useQuery } from '../lib/api.ts';
+import { roleLabel } from '../lib/format.ts';
 import type { DemoCredential, Role } from '../lib/types.ts';
 import { useSession } from '../session.tsx';
 import { Button, Field, Notice, TextInput } from '../components/ui.tsx';
 
 interface LoginResponse {
   token: string;
-  user: { name: string; role: Role; tenantName: string };
-}
-
-function roleLabel(role: string): string {
-  if (role === 'csr') return 'CSR';
-  return role.charAt(0).toUpperCase() + role.slice(1);
+  user: { id: string; name: string; role: Role; tenantName: string };
 }
 
 /** What a first-time viewer is actually looking at, stated plainly. */
@@ -54,6 +50,7 @@ export function SignIn() {
     if (!result) return;
     signIn({
       apiKey: result.token,
+      userId: result.user.id,
       name: result.user.name,
       role: result.user.role,
       tenantName: result.user.tenantName,
