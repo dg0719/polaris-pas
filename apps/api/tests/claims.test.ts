@@ -33,7 +33,7 @@ function issuePolicy(): string {
     accountId: account.id,
     productCode: 'ON_PA',
     effectiveDate: EFFECTIVE,
-    billingPlan: 'annual',
+    billingPlan: 'full',
     risk: cleanRisk(),
   });
   quoteJob(db, csr, job.id);

@@ -39,7 +39,7 @@ function issuePolicyWithCollision(): string {
     accountId: account.id,
     productCode: 'ON_PA',
     effectiveDate: EFFECTIVE,
-    billingPlan: 'annual',
+    billingPlan: 'full',
     risk,
   });
   quoteJob(db, csr, job.id);
