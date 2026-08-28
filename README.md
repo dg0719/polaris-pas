@@ -94,8 +94,8 @@ PORT=8080 npm start
 
 Behind a reverse proxy, forward everything to that port; the app needs no path
 rewriting. To persist data across deploys, point `POLARIS_DB` at a file on a
-mounted volume. There is no migration path between schema versions yet, so a
-schema change means reseeding.
+mounted volume. Schema changes are numbered, forward-only migrations
+(`apps/api/src/migrations/`) applied automatically on startup.
 
 ## First start
 
@@ -122,7 +122,8 @@ packages/domain    Pure domain logic — no I/O, no framework
                      payment authority, fraud rules
 
 apps/api           HTTP API — node:http + node:sqlite, zero runtime dependencies
-  db.ts              Schema, versioning and transactions
+  db.ts              Database connection, migration runner, transactions
+  migrations/        Numbered, forward-only schema migrations
   repo/              Tenant-scoped data access, split by aggregate
   accounts.ts        Customers of record and their rollups
   jobs.ts            Job creation, quoting and workflow actions
