@@ -1,5 +1,6 @@
 import type { Db } from '../db.ts';
 import { baseline } from './001_baseline.ts';
+import { billing } from './002_billing.ts';
 
 export interface Migration {
   id: number;
@@ -7,7 +8,7 @@ export interface Migration {
   up(db: Db): void;
 }
 
-export const MIGRATIONS: Migration[] = [baseline];
+export const MIGRATIONS: Migration[] = [baseline, billing];
 
 /**
  * Forward-only, numbered migrations. Each runs once, inside a transaction,
