@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { sliceCharge } from '../../src/billing/slicing.ts';
+import { PlanDefinitionError, sliceCharge } from '../../src/billing/slicing.ts';
 import { splitRemainderLast } from '../../src/billing/split.ts';
 import type { ChargePatternDef, PaymentPlanDef } from '../../src/billing/types.ts';
 
@@ -57,5 +57,13 @@ describe('sliceCharge', () => {
   test('a negative charge slices without losing a cent', () => {
     const items = sliceCharge({ ...base, amountCents: -1_001, plan: monthly, feePattern: null });
     expect(items.reduce((s, i) => s + i.amountCents, 0)).toBe(-1_001);
+  });
+
+  test('a plan with zero installments is refused rather than silently dropping the charge', () => {
+    expect(() => sliceCharge({ ...base, plan: { ...monthly, installments: 0 }, feePattern: null })).toThrow(PlanDefinitionError);
+  });
+
+  test('a fee above the regulatory cap is refused even on a negative charge', () => {
+    expect(() => sliceCharge({ ...base, amountCents: -1_001, plan: { ...twoDown, feeBps: 300 }, feePattern: FEE })).toThrow(/cap/);
   });
 });

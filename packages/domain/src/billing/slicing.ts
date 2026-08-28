@@ -6,6 +6,12 @@ const MONTHS: Record<Periodicity, number> = { monthly: 1, quarterly: 3, annual: 
 
 export class PlanCapError extends Error {}
 
+/** A plan definition that is structurally impossible to slice by, or that
+ * violates a regulatory cap — distinct from `PlanCapError`'s narrower
+ * "fee exceeds the cap" case only in that this covers every structural
+ * defect a plan can carry, cap included, checked unconditionally. */
+export class PlanDefinitionError extends Error {}
+
 export interface SliceInput {
   amountCents: number;
   patternCode: string;
@@ -16,6 +22,26 @@ export interface SliceInput {
 }
 
 /**
+ * Reject a plan that cannot be sliced correctly, regardless of the charge's
+ * sign or the caller's fee pattern. Checked unconditionally so a negative
+ * charge or a missing fee pattern can't smuggle a bad plan past validation.
+ */
+function validatePlan(plan: PaymentPlanDef): void {
+  if (plan.installments < 1) {
+    throw new PlanDefinitionError(`Plan ${plan.code} has ${plan.installments} installments; at least 1 is required`);
+  }
+  if (plan.downPaymentBps < 0 || plan.downPaymentBps > 10_000) {
+    throw new PlanDefinitionError(`Plan ${plan.code} down payment ${plan.downPaymentBps} bps must be between 0 and 10,000`);
+  }
+  if (plan.feeBps < 0) {
+    throw new PlanDefinitionError(`Plan ${plan.code} fee ${plan.feeBps} bps must not be negative`);
+  }
+  if (plan.feeCapBps !== null && plan.feeBps > plan.feeCapBps) {
+    throw new PlanCapError(`Plan ${plan.code} fee ${plan.feeBps} bps exceeds the cap of ${plan.feeCapBps} bps`);
+  }
+}
+
+/**
  * Slice a charge into invoice items: a down payment at inception (if the
  * plan has one), equal installments on the plan's cadence with the rounding
  * remainder on the last, and the installment fee spread over the
@@ -23,6 +49,7 @@ export interface SliceInput {
  */
 export function sliceCharge(input: SliceInput): SlicedItem[] {
   const { plan } = input;
+  validatePlan(plan);
   const downBps = input.instructionType === 'renewal' && plan.renewalDownPaymentBps !== null
     ? plan.renewalDownPaymentBps : plan.downPaymentBps;
   const items: SlicedItem[] = [];
@@ -41,9 +68,6 @@ export function sliceCharge(input: SliceInput): SlicedItem[] {
   });
 
   if (input.feePattern && plan.feeBps > 0 && input.amountCents > 0) {
-    if (plan.feeCapBps !== null && plan.feeBps > plan.feeCapBps) {
-      throw new PlanCapError(`Plan ${plan.code} fee ${plan.feeBps} bps exceeds the cap of ${plan.feeCapBps} bps`);
-    }
     const fee = bpsOf(input.amountCents, plan.feeBps);
     splitRemainderLast(fee, parts.length).forEach((amountCents, i) => {
       items.push({ kind: 'fee', patternCode: input.feePattern!.code, amountCents, eventDate: dates[i]!, sequence: sequence++ });
