@@ -6,6 +6,7 @@ export * from './uwRules.ts';
 export * from './stateMachine.ts';
 export * from './proration.ts';
 export * from './billing.ts';
+export * from './billing/index.ts';
 export * from './claims/types.ts';
 export * from './claims/financials.ts';
 export * from './claims/coverageInForce.ts';
