@@ -8,3 +8,6 @@ test('addMonths clamps to the end of a shorter month', () => {
 test('addDays crosses a year boundary', () => {
   expect(addDays('2026-12-30', 3)).toBe('2027-01-02');
 });
+test('fails fast on non-ISO input', () => {
+  expect(() => addMonths('2026-09-01T00:00:00Z', 1)).toThrow(/YYYY-MM-DD/);
+});
