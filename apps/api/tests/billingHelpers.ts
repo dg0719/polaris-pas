@@ -96,9 +96,10 @@ export function feeItemsOn(db: Db, ctx: TenantCtx, invoiceId: string): number[] 
 }
 
 /**
- * The three invariants of spec §2 (ledger balance, charge coverage,
- * receivable truth), plus the one thing they cannot know: that the premium
- * charges together equal the written premium of record in `transactions`.
+ * The four invariants of spec §2 (ledger balance, charge coverage,
+ * receivable truth, no negative journal line), plus the one thing they
+ * cannot know: that the premium charges together equal the written premium
+ * of record in `transactions`.
  */
 export function assertInvariants(db: Db, ctx: TenantCtx, policy: PolicyRow): void {
   assertBillingInvariants(db, ctx, policy.account_id);

@@ -179,7 +179,7 @@ export function accountBillingTotals(
 }
 
 /**
- * The three invariants of the billing design, checked against the database
+ * The four invariants of the billing design, checked against the database
  * as it actually stands. Throws naming the first one that fails.
  *
  * 1. **Ledger balance** — every journal entry's debits equal its credits.
@@ -191,7 +191,7 @@ export function accountBillingTotals(
  *
  * Tests call this after every billing operation. It is deliberately a
  * function rather than a set of assertions in one test file: a new job type
- * or a new payment path must be provable against the same three rules
+ * or a new payment path must be provable against the same four rules
  * without restating them.
  */
 export function assertBillingInvariants(db: Db, ctx: TenantCtx, accountId: string): void {

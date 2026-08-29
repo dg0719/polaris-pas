@@ -365,6 +365,9 @@ its claims function reconciles incurred against paid and recovered. Mixing
 them makes both reconciliations wrong. Deductible recovery is a claim
 recovery record, not an invoice.
 
+**Superseded by D-025 (invariants 4a–4d), which remain a statement about
+premium only.**
+
 ---
 
 ## D-018 · Reserves move by appending signed deltas, never by edit

@@ -1,8 +1,11 @@
 # Polaris PAS
 
 A core insurance system for small and mid-sized Canadian property and casualty insurers:
-policy administration, billing and claims. Policy administration is substantially built,
-billing is a working slice, claims has not been started. See [ROADMAP.md](ROADMAP.md).
+policy administration, billing and claims. Policy administration is substantially built for
+one product; billing is a double-entry ledger with configurable payment plans and a billing
+day; claims — first notice of loss through adjuster workflow to closure — is built ahead of
+the roadmap's order. Multi-tenant throughout, with 314 tests and two browser tests. See
+[ROADMAP.md](ROADMAP.md).
 
 First product: **Ontario personal auto**, with a working web client.
 

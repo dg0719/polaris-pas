@@ -16,13 +16,14 @@ import * as repo from '../src/repo.ts';
 import type { TenantCtx } from '../src/repo.ts';
 import { cleanRisk, makeAccount, makeTenant, testDb } from './helpers.ts';
 
-// ─── The three billing invariants, exercised by every job type ─────────────
-// Spec §2 replaced the old single billing invariant with three: every
-// journal entry balances, every charge is covered by its items, and the
-// premium receivable in the ledger equals what the live items still owe.
-// `assertBillingInvariants` is the one place that checks all three, so it is
-// worth proving both that it passes on real work and that each of its three
-// checks actually fires when the thing it guards is broken.
+// ─── The four billing invariants, exercised by every job type ──────────────
+// Spec §2 replaced the old single billing invariant with four: every journal
+// entry balances, every charge is covered by its items, the premium
+// receivable in the ledger equals what the live items still owe, and no
+// journal line is ever stored negative. `assertBillingInvariants` is the one
+// place that checks all four, so it is worth proving both that it passes on
+// real work and that each of its four checks actually fires when the thing
+// it guards is broken.
 
 const TERM_START = '2026-09-01';
 
