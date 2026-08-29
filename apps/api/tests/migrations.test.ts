@@ -4,6 +4,19 @@ import { openDb } from '../src/db.ts';
 import { MIGRATIONS, migrate } from '../src/migrations/index.ts';
 import { bootstrapTenant } from '../src/bootstrap.ts';
 
+/** tenant_id must be declared TEXT NOT NULL REFERENCES tenants(id) on every
+ * billing table, not the bare, untyped column the brief's SQL shorthand
+ * could be misread as. Checking two tables pins the column definition used
+ * by all fourteen, since they're generated from the same brief text. */
+function expectTenantIdIsTypedForeignKey(db: DatabaseSync, table: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string; type: string; notnull: number }[];
+  const tenantId = columns.find((c) => c.name === 'tenant_id');
+  expect(tenantId?.type).toBe('TEXT');
+  expect(tenantId?.notnull).toBe(1);
+  const foreignKeys = db.prepare(`PRAGMA foreign_key_list(${table})`).all() as { table: string; from: string }[];
+  expect(foreignKeys).toContainEqual(expect.objectContaining({ table: 'tenants', from: 'tenant_id' }));
+}
+
 describe('migrations', () => {
   test('a fresh database records every migration', () => {
     const db = openDb(':memory:');
@@ -60,5 +73,7 @@ describe('migrations', () => {
     const unbalanced = db.prepare(`SELECT entry_id FROM journal_lines GROUP BY entry_id HAVING SUM(debit_cents) <> SUM(credit_cents)`).all();
     expect(unbalanced).toEqual([]);
     expect(db.prepare(`SELECT name FROM sqlite_master WHERE name = 'legacy_invoices'`).get()).toBeTruthy();
+    expectTenantIdIsTypedForeignKey(db, 'invoice_items');
+    expectTenantIdIsTypedForeignKey(db, 'journal_lines');
   });
 });
