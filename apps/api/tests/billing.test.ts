@@ -1,7 +1,9 @@
 import type { RiskData } from '@polaris/domain';
 import { beforeEach, describe, expect, test } from 'vitest';
 import { createAccount } from '../src/accounts.ts';
+import { recordPayment, unappliedCents } from '../src/billing/payments.ts';
 import type { Db } from '../src/db.ts';
+import { ApiError } from '../src/errors.ts';
 import { issueJob } from '../src/issue.ts';
 import {
   bindJob,
@@ -432,5 +434,150 @@ describe('cancellation', () => {
       ).toBe(charge.amount_cents);
     }
     invariants(policy);
+  });
+});
+
+describe('payments', () => {
+  test('a payment is applied oldest invoice first and the rest stays in unapplied cash', () => {
+    const { policy } = issue('monthly');
+    const first = repo.listInvoicesForPolicy(db, csr, policy.id)[0]!;
+    const firstTotal = invoiceTotal(first.id);
+    const result = recordPayment(db, csr, {
+      accountId,
+      amountCents: firstTotal + 100,
+      method: 'eft',
+      receivedAt: '2026-09-01',
+    });
+
+    expect(result.appliedCents).toBe(firstTotal + 100); // 100 flows into invoice 2
+    expect(result.unappliedCents).toBe(0);
+    expect(repo.getInvoice(db, csr, first.id)!.status).toBe('paid');
+    expect(unappliedCents(db, csr, accountId)).toBe(0);
+
+    // The second invoice took the overflow onto its premium, not its fee.
+    const second = repo.listInvoicesForPolicy(db, csr, policy.id)[1]!;
+    const secondItems = repo.listItemsForInvoice(db, csr, second.id);
+    expect(secondItems.find((i) => i.kind === 'installment')!.paid_cents).toBe(100);
+    expect(secondItems.find((i) => i.kind === 'fee')!.paid_cents).toBe(0);
+    expect(repo.getInvoice(db, csr, second.id)!.status).toBe('planned');
+
+    // What the account still owes is what the ledger says it owes.
+    expect(repo.accountBalance(db, csr, '1100', { accountId })).toBe(
+      repo
+        .listItemsForAccount(db, csr, accountId)
+        .reduce((s, i) => s + i.amount_cents - i.paid_cents, 0),
+    );
+    expect(repo.listItemApplicationsForPayment(db, csr, result.payment.id)).toHaveLength(3);
+  });
+
+  test('overpaying everything leaves a real unapplied cash balance in the ledger', () => {
+    const { policy } = issue('full');
+    const total = repo
+      .listItemsForPolicy(db, csr, policy.id)
+      .reduce((s, i) => s + i.amount_cents, 0);
+    const result = recordPayment(db, csr, {
+      accountId,
+      amountCents: total + 5_000,
+      method: 'cheque',
+      receivedAt: '2026-09-01',
+    });
+
+    expect(result.appliedCents).toBe(total);
+    expect(unappliedCents(db, csr, accountId)).toBe(5_000);
+    expect(repo.accountBalance(db, csr, '1100', { accountId })).toBe(0);
+    // Cash clearing holds the whole payment; only the applied part left 2100.
+    expect(repo.accountBalance(db, csr, '1200', { accountId })).toBe(total + 5_000);
+  });
+
+  test('fee items are settled after the premium on the same invoice', () => {
+    const { policy } = issue('monthly');
+    const first = repo.listInvoicesForPolicy(db, csr, policy.id)[0]!;
+    const items = repo.listItemsForInvoice(db, csr, first.id);
+    const premium = items.find((i) => i.kind === 'installment')!;
+    recordPayment(db, csr, {
+      accountId,
+      amountCents: premium.amount_cents,
+      method: 'eft',
+      receivedAt: '2026-09-01',
+    });
+
+    const after = repo.listItemsForInvoice(db, csr, first.id);
+    expect(after.find((i) => i.kind === 'installment')!.paid_cents).toBe(premium.amount_cents);
+    expect(after.find((i) => i.kind === 'fee')!.paid_cents).toBe(0);
+    expect(repo.getInvoice(db, csr, first.id)!.status).toBe('planned');
+  });
+
+  test('a payment targeted at one policy leaves another policy on the account alone', () => {
+    const { policy: first } = issue('monthly');
+    const { policy: second } = issue('monthly');
+    const target = repo.listInvoicesForPolicy(db, csr, second.id)[0]!;
+
+    recordPayment(db, csr, {
+      accountId,
+      amountCents: invoiceTotal(target.id),
+      method: 'eft',
+      receivedAt: '2026-09-01',
+      policyId: second.id,
+    });
+
+    expect(repo.getInvoice(db, csr, target.id)!.status).toBe('paid');
+    expect(
+      repo.listItemsForPolicy(db, csr, first.id).every((i) => i.paid_cents === 0),
+    ).toBe(true);
+  });
+
+  test('a zero or negative payment is refused', () => {
+    expect(() =>
+      recordPayment(db, csr, { accountId, amountCents: 0, method: 'cash', receivedAt: '2026-09-01' }),
+    ).toThrow(ApiError);
+    expect(() =>
+      recordPayment(db, csr, {
+        accountId,
+        amountCents: -1,
+        method: 'cash',
+        receivedAt: '2026-09-01',
+      }),
+    ).toThrow(ApiError);
+    expect(repo.listPayments(db, csr, accountId)).toHaveLength(0);
+  });
+
+  test('a credit note from a cancellation is a negative receivable, not unapplied cash', () => {
+    const { policy } = issue('full');
+    const total = repo
+      .listItemsForPolicy(db, csr, policy.id)
+      .reduce((s, i) => s + i.amount_cents, 0);
+    recordPayment(db, csr, {
+      accountId,
+      amountCents: total,
+      method: 'eft',
+      receivedAt: '2026-09-01',
+    });
+    expect(unappliedCents(db, csr, accountId)).toBe(0);
+    expect(repo.accountBalance(db, csr, '1100', { policyId: policy.id })).toBe(0);
+
+    const cancel = createCancellation(db, csr, {
+      policyId: policy.id,
+      effectiveDate: '2027-03-01',
+      reason: 'insured request',
+    });
+    const { transaction } = runJob(cancel.id);
+    expect(transaction.amount_cents).toBeLessThan(0);
+
+    const invoices = repo.listInvoicesForPolicy(db, csr, policy.id);
+    expect(invoices).toHaveLength(2);
+    const credit = invoices.at(-1)!;
+    expect(credit.status).toBe('billed');
+    const creditItems = repo.listItemsForInvoice(db, csr, credit.id);
+    expect(creditItems).toHaveLength(1);
+    expect(creditItems[0]!.kind).toBe('oneTime');
+    expect(creditItems[0]!.amount_cents).toBe(transaction.amount_cents);
+
+    // The refund owed sits as a negative premium receivable on the policy.
+    // Money the customer paid was applied, so no unapplied cash was created.
+    expect(unappliedCents(db, csr, accountId)).toBe(0);
+    expect(repo.accountBalance(db, csr, '1100', { policyId: policy.id })).toBe(
+      invoiceTotal(credit.id),
+    );
+    expect(repo.accountBalance(db, csr, '1100', { policyId: policy.id })).toBeLessThan(0);
   });
 });
