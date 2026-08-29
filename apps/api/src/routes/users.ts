@@ -14,7 +14,15 @@ import { authenticated, body, param } from './context.ts';
  * first start: the bootstrap admin creates the rest of the team.
  */
 
-const ROLES: readonly Role[] = ['csr', 'underwriter', 'adjuster', 'claims_supervisor', 'admin'];
+const ROLES: readonly Role[] = [
+  'csr',
+  'underwriter',
+  'adjuster',
+  'claims_supervisor',
+  'admin',
+  'billing',
+  'finance',
+];
 const CLAIMS_ROLES = new Set<Role>(['adjuster', 'claims_supervisor', 'admin']);
 const MIN_PASSWORD_LENGTH = 8;
 

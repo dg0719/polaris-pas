@@ -177,6 +177,40 @@ describe('accounts', () => {
     expect(res.status).toBe(400);
   });
 
+  // The catalogue is the authority on what may be quoted. A plan the carrier
+  // configured must be quotable without the server being changed, or "product
+  // configuration is data" is not true of payment plans.
+  test('a configured plan outside the three shipped codes is accepted', async () => {
+    const accountId = await createAccount();
+    const res = await call('POST', `/accounts/${accountId}/submissions`, {
+      key: keys['csr'],
+      body: {
+        productCode: 'ON_PA',
+        effectiveDate: '2026-09-01',
+        billingPlan: 'monthly-2down',
+        risk: cleanRisk(),
+      },
+    });
+    expect(res.status).toBe(201);
+    expect(rec(res.body['job'])['billingPlan']).toBe('monthly-2down');
+  });
+
+  // Plans are filtered by product and by the account's province, so a plan
+  // configured for Ontario cannot be quoted on an Alberta account.
+  test('a plan not configured for the account province is rejected', async () => {
+    const accountId = await createAccount({ province: 'AB', postalCode: 'T2P 1J9' });
+    const res = await call('POST', `/accounts/${accountId}/submissions`, {
+      key: keys['csr'],
+      body: {
+        productCode: 'ON_PA',
+        effectiveDate: '2026-09-01',
+        billingPlan: 'monthly-2down',
+        risk: cleanRisk(),
+      },
+    });
+    expect(res.status).toBe(400);
+  });
+
   test('a submission for an account in another tenant is a 404', async () => {
     const accountId = await createAccount();
     const other = makeTenant(db, 'Northstar Mutual', 'NSTR');
@@ -202,6 +236,17 @@ describe('billing over HTTP', () => {
     const invoices = before.body['invoices'] as Record<string, unknown>[];
     expect(invoices.length).toBe(12);
 
+    // Each invoice carries its own lines, and they sum to its total: the
+    // total is derived from them, never stored on the invoice.
+    const lines = invoices[0]!['lines'] as Record<string, unknown>[];
+    expect(lines.map((l) => l['kind'])).toEqual(['installment', 'fee']);
+    expect(lines.reduce((sum, l) => sum + (l['amountCents'] as number), 0)).toBe(
+      invoices[0]!['totalCents'],
+    );
+    expect(invoices[0]!['amountCents']).toBe(invoices[0]!['totalCents']);
+    expect(invoices[0]!['status']).toBe('planned');
+    expect(rec(before.body['rollup'])['unappliedCents']).toBe(0);
+
     const paid = await call('POST', `/accounts/${accountId}/payments`, {
       key: keys['csr'],
       body: {
@@ -217,7 +262,33 @@ describe('billing over HTTP', () => {
     const after = await call('GET', `/accounts/${accountId}/billing`, { key: keys['csr'] });
     const first = (after.body['invoices'] as Record<string, unknown>[])[0]!;
     expect(first['status']).toBe('paid');
-    expect((after.body['payments'] as unknown[]).length).toBe(1);
+    const payments = after.body['payments'] as Record<string, unknown>[];
+    expect(payments.length).toBe(1);
+    expect(payments[0]!['status']).toBe('cleared');
+    expect(payments[0]!['policyId']).toBeNull();
+  });
+
+  test('a payment targeted at a policy on another account is refused', async () => {
+    const mine = await createAccount();
+    await issuePolicyFor(mine);
+    const theirs = await createAccount({ name: 'Daniel Okonkwo' });
+    const theirPolicyId = await issuePolicyFor(theirs);
+
+    const res = await call('POST', `/accounts/${mine}/payments`, {
+      key: keys['csr'],
+      body: {
+        amountCents: 1000,
+        method: 'eft',
+        receivedAt: '2026-09-01',
+        policyId: theirPolicyId,
+      },
+    });
+    expect(res.status).toBe(400);
+    expect(rec(res.body['error'])['code']).toBe('policy_not_on_account');
+
+    // Nothing was taken: the guard runs before any money is recorded.
+    const billing = await call('GET', `/accounts/${mine}/billing`, { key: keys['csr'] });
+    expect(billing.body['payments']).toEqual([]);
   });
 
   test('an unsupported payment method is rejected', async () => {

@@ -1,5 +1,4 @@
-import type { RiskData } from '@polaris/domain';
-import { reconcile, scheduleTerm } from './billing.ts';
+import { applyIssuedJob } from './billing/instructions.ts';
 import type { Db } from './db.ts';
 import { inTransaction } from './db.ts';
 import { ApiError } from './errors.ts';
@@ -20,9 +19,6 @@ const TRANSACTION_TYPE = {
   Renewal: 'Renewal',
   Cancellation: 'Cancellation',
 } as const;
-
-/** Job types that begin a term, and therefore lay down a billing schedule. */
-const STARTS_A_TERM = new Set(['Submission', 'Renewal']);
 
 /**
  * Issue a bound job: append an immutable policy version, record the financial
@@ -66,16 +62,7 @@ export function issueJob(db: Db, ctx: TenantCtx, jobId: string): IssueResult {
       amount_cents: quote.changeAmountCents,
     });
 
-    if (STARTS_A_TERM.has(job.job_type)) {
-      scheduleTerm(db, ctx, policy, {
-        termNumber,
-        termStart: job.term_start,
-        termMonths: (JSON.parse(job.risk_json) as RiskData).termMonths,
-        amountCents: quote.changeAmountCents,
-        plan: job.billing_plan,
-      });
-    }
-    reconcile(db, ctx, policy, { effectiveDate: job.effective_date, termNumber });
+    applyIssuedJob(db, ctx, { job, policy, version, transaction, termNumber });
 
     repo.updateJob(db, ctx, jobId, { status: nextStatus, policy_id: policy.id });
 

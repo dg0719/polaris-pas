@@ -1,12 +1,36 @@
-import { money, planLabel, planName, useLabel } from '../../lib/format.ts';
+import { useEffect } from 'react';
+import { money, planNote, useLabel } from '../../lib/format.ts';
+import { usePaymentPlans } from '../../lib/plans.ts';
 import type { Driver, ProductDefinition, Vehicle } from '../../lib/types.ts';
-import { Button, Choice, Field, Select, TextInput } from '../../components/ui.tsx';
+import { Button, Choice, Field, Notice, Select, TextInput } from '../../components/ui.tsx';
 import { DEFAULT_COVERAGE, type VehicleCoverage, type WizardForm } from './model.ts';
 
 type Update = (patch: Partial<WizardForm>) => void;
 
 /** Step 1: when cover starts, how long for, and how it gets paid. */
-export function PolicyStep({ form, update }: { form: WizardForm; update: Update }) {
+export function PolicyStep({
+  form,
+  update,
+  productCode,
+  province,
+}: {
+  form: WizardForm;
+  update: Update;
+  productCode: string;
+  province: string | undefined;
+}) {
+  const { plans, loading, error } = usePaymentPlans(productCode, province);
+
+  // A plan the carrier has not configured cannot be quoted, so the selection
+  // moves to the first offered plan rather than posting a code the API rejects.
+  const offered = plans ?? [];
+  const selected = offered.some((plan) => plan.code === form.billingPlan);
+  useEffect(() => {
+    if (offered.length > 0 && !selected) update({ billingPlan: offered[0]!.code });
+    // `update` is a fresh closure every render; the offered plans and whether
+    // one is selected are what decide if the choice has to move.
+  }, [offered, selected]);
+
   return (
     <div className="stack" style={{ gap: 'var(--s-7)', maxWidth: '48rem' }}>
       <div className="form-grid">
@@ -38,16 +62,22 @@ export function PolicyStep({ form, update }: { form: WizardForm; update: Update 
         <legend className="field__label" style={{ marginBottom: 'var(--s-3)' }}>
           Billing plan
         </legend>
-        <div className="choices">
-          {(['full', 'monthly', 'quarterly'] as const).map((plan) => (
+        {error ? <Notice tone="error">{error.message}</Notice> : null}
+        {!error && offered.length === 0 ? (
+          <p className="section__note">
+            {loading ? 'Loading the payment plans…' : 'No payment plan is configured for this product.'}
+          </p>
+        ) : null}
+        <div className="choices choices--block">
+          {offered.map((plan) => (
             <Choice
-              key={plan}
+              key={plan.code}
               name="billingPlan"
-              value={plan}
-              checked={form.billingPlan === plan}
-              onChange={(value) => update({ billingPlan: value as WizardForm['billingPlan'] })}
-              title={planName(plan)}
-              note={planLabel(plan)}
+              value={plan.code}
+              checked={form.billingPlan === plan.code}
+              onChange={(value) => update({ billingPlan: value })}
+              title={plan.name}
+              note={planNote(plan)}
             />
           ))}
         </div>

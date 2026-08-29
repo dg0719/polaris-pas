@@ -24,7 +24,15 @@ interface TeamUser {
   authorityLimitCents: number;
 }
 
-const ROLES: Role[] = ['csr', 'underwriter', 'adjuster', 'claims_supervisor', 'admin'];
+const ROLES: Role[] = [
+  'csr',
+  'underwriter',
+  'adjuster',
+  'claims_supervisor',
+  'billing',
+  'finance',
+  'admin',
+];
 const CLAIMS_ROLES = new Set<Role>(['adjuster', 'claims_supervisor', 'admin']);
 
 const ROLE_NOTES: Record<Role, string> = {
@@ -32,6 +40,8 @@ const ROLE_NOTES: Record<Role, string> = {
   underwriter: 'Decides referred risks; nothing referred binds without them.',
   adjuster: 'Works claims: reserves, payments within their authority, diary.',
   claims_supervisor: 'Approves claim payments above an adjuster’s authority.',
+  billing: 'Records payments, runs the billing day, works delinquencies.',
+  finance: 'Approves refunds and write-offs, exports the general ledger.',
   admin: 'Everything, including this screen.',
 };
 

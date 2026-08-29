@@ -1,3 +1,4 @@
+import { accountBillingTotals } from './billing/readModel.ts';
 import type { Db } from './db.ts';
 import { ApiError } from './errors.ts';
 import * as repo from './repo.ts';
@@ -32,15 +33,22 @@ export interface AccountRollup {
   /** Premium in force: the annual premium of every current, non-cancelled term. */
   annualPremiumCents: number;
   billedCents: number;
+  /** What the account has settled: the paid portion of its live invoice items. */
   paidCents: number;
   /** Positive = the customer owes money; negative = they are in credit. */
   balanceCents: number;
   pastDueCents: number;
+  /** Cash received that has not settled anything yet. */
+  unappliedCents: number;
 }
 
 const OPEN_JOB_STATUSES = new Set(['Draft', 'Quoted', 'Bound']);
 
-/** Roll a whole account up to the numbers that belong at the top of its page. */
+/**
+ * Roll a whole account up to the numbers that belong at the top of its page.
+ * The money comes from the billing read model rather than being recomputed
+ * here, so the account page and the policy page can never disagree.
+ */
 export function accountRollup(
   db: Db,
   ctx: TenantCtx,
@@ -49,18 +57,12 @@ export function accountRollup(
 ): AccountRollup {
   const policies = repo.listPolicies(db, ctx, { accountId });
   const jobs = repo.listJobs(db, ctx, { accountId });
-  const invoices = repo.listInvoicesForAccount(db, ctx, accountId).filter((i) => i.status !== 'void');
-  const payments = repo.listPayments(db, ctx, accountId);
+  const { billedCents, paidCents, balanceCents, pastDueCents, unappliedCents } =
+    accountBillingTotals(db, ctx, accountId, today);
 
   const annualPremiumCents = policies
     .filter((p) => p.status === 'InForce')
     .reduce((sum, p) => sum + (repo.currentPolicyVersion(db, ctx, p.id)?.annual_premium_cents ?? 0), 0);
-
-  const billedCents = invoices.reduce((sum, i) => sum + i.amount_cents, 0);
-  const paidCents = payments.reduce((sum, p) => sum + p.amount_cents, 0);
-  const pastDueCents = invoices
-    .filter((i) => i.due_date <= today && i.paid_cents < i.amount_cents)
-    .reduce((sum, i) => sum + (i.amount_cents - i.paid_cents), 0);
 
   return {
     policyCount: policies.length,
@@ -69,7 +71,8 @@ export function accountRollup(
     annualPremiumCents,
     billedCents,
     paidCents,
-    balanceCents: billedCents - paidCents,
+    balanceCents,
     pastDueCents,
+    unappliedCents,
   };
 }

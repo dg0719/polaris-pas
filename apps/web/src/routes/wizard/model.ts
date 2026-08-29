@@ -1,7 +1,7 @@
 import type {
   CoverageSelection,
   Driver,
-  InstallmentPlan,
+  PlanCode,
   ProductDefinition,
   RiskData,
   Vehicle,
@@ -18,7 +18,7 @@ export interface VehicleCoverage {
 export interface WizardForm {
   effectiveDate: string;
   termMonths: number;
-  billingPlan: InstallmentPlan;
+  billingPlan: PlanCode;
   drivers: Driver[];
   vehicles: Vehicle[];
   coverages: Record<string, VehicleCoverage>;

@@ -1,5 +1,16 @@
-export type Role = 'csr' | 'underwriter' | 'adjuster' | 'claims_supervisor' | 'admin';
-export type InstallmentPlan = 'full' | 'monthly' | 'quarterly';
+export type Role =
+  | 'csr'
+  | 'underwriter'
+  | 'adjuster'
+  | 'claims_supervisor'
+  | 'admin'
+  | 'billing'
+  | 'finance';
+/**
+ * A payment plan code. Plans are carrier configuration, not code: the set of
+ * codes comes from `GET /billing/plans`, so this is deliberately a string.
+ */
+export type PlanCode = string;
 export type JobStatus = 'Draft' | 'Quoted' | 'Bound' | 'Issued' | 'Declined' | 'Withdrawn';
 export type JobType = 'Submission' | 'PolicyChange' | 'Renewal' | 'Cancellation';
 
@@ -104,7 +115,7 @@ export interface Job {
   status: JobStatus;
   policyId: string | null;
   productCode: string;
-  billingPlan: InstallmentPlan;
+  billingPlan: PlanCode;
   effectiveDate: string;
   termStart: string;
   termEnd: string;
@@ -157,6 +168,8 @@ export interface AccountRollup {
   paidCents: number;
   balanceCents: number;
   pastDueCents: number;
+  /** Money received that no invoice has claimed yet. */
+  unappliedCents: number;
 }
 
 export interface Policy {
@@ -165,7 +178,7 @@ export interface Policy {
   policyNumber: string;
   productCode: string;
   status: 'InForce' | 'Cancelled' | 'Expired';
-  billingPlan: InstallmentPlan;
+  billingPlan: PlanCode;
 }
 
 export interface PolicySummary extends Policy {
@@ -204,17 +217,45 @@ export interface LedgerTransaction {
 
 export type InvoiceStatus = 'planned' | 'due' | 'overdue' | 'paid' | 'void' | 'credit';
 
+/** What an invoice is made of: premium, the down payment, fees, tax. */
+export interface InvoiceLine {
+  id: string;
+  kind: 'downPayment' | 'installment' | 'oneTime' | 'fee' | 'tax';
+  patternCode: string;
+  amountCents: number;
+  paidCents: number;
+}
+
 export interface Invoice {
   id: string;
   policyId: string;
   invoiceNumber: string;
   sequence: number;
   termNumber: number;
+  eventDate: string;
+  billDate: string;
   dueDate: string;
-  amountCents: number;
+  totalCents: number;
   paidCents: number;
+  /** Negative on a credit note; screens show it as a credit, never as a minus. */
   outstandingCents: number;
   status: InvoiceStatus;
+  lines: InvoiceLine[];
+}
+
+/** A payment plan as the billing catalogue holds it. */
+export interface PaymentPlan {
+  code: string;
+  name: string;
+  downPaymentBps: number;
+  installments: number;
+  periodicity: 'annual' | 'semiannual' | 'quarterly' | 'monthly';
+  feePatternCode: string | null;
+  feeBps: number;
+  feeCapBps: number | null;
+  renewalDownPaymentBps: number | null;
+  products: string[];
+  provinces: string[];
 }
 
 export interface Payment {
@@ -226,7 +267,7 @@ export interface Payment {
 }
 
 export interface PolicyBilling {
-  plan: InstallmentPlan;
+  plan: string;
   billedCents: number;
   paidCents: number;
   balanceCents: number;

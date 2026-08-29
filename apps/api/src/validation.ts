@@ -1,8 +1,6 @@
 import {
-  isInstallmentPlan,
   type CoverageSelection,
   type Driver,
-  type InstallmentPlan,
   type PrimaryUse,
   type RiskData,
   type Vehicle,
@@ -217,11 +215,24 @@ export function parseAccountInput(value: unknown): AccountInput {
   };
 }
 
-export function requireInstallmentPlan(value: unknown, field: string): InstallmentPlan {
-  if (!isInstallmentPlan(value)) {
-    throw ApiError.badRequest(`${field} must be one of full, monthly, quarterly`);
+/**
+ * A payment plan code, checked against the plans the carrier has configured
+ * rather than against a list compiled into the server. A hard-coded list makes
+ * a configured plan unquotable, which is the opposite of plans being data: the
+ * caller passes the catalogue's codes and the catalogue is the authority.
+ */
+export function requirePlanCode(
+  value: unknown,
+  field: string,
+  configured: readonly string[],
+): string {
+  const code = requireString(value, field);
+  if (!configured.includes(code)) {
+    throw ApiError.badRequest(
+      `${field} must be a configured payment plan: ${configured.join(', ') || 'none configured'}`,
+    );
   }
-  return value;
+  return code;
 }
 
 const PAYMENT_METHODS = ['card', 'eft', 'cheque', 'cash'];
@@ -231,6 +242,7 @@ export function parsePaymentInput(value: unknown): {
   method: 'card' | 'eft' | 'cheque' | 'cash';
   reference?: string;
   receivedAt: string;
+  policyId?: string;
 } {
   const obj = asObject(value, 'payment');
   const method = obj['method'];
@@ -238,11 +250,15 @@ export function parsePaymentInput(value: unknown): {
     throw ApiError.badRequest(`payment.method must be one of ${PAYMENT_METHODS.join(', ')}`);
   }
   const reference = optStr(obj, 'reference', 'payment');
+  // A targeted payment settles only one policy's items. The route checks the
+  // policy is on the account; the payment service trusts what it is given.
+  const policyId = optStr(obj, 'policyId', 'payment');
   return {
     amountCents: intNum(obj, 'amountCents', 'payment', 1),
     method: method as 'card' | 'eft' | 'cheque' | 'cash',
     ...(reference ? { reference } : {}),
     receivedAt: isoDate(obj, 'receivedAt', 'payment'),
+    ...(policyId ? { policyId } : {}),
   };
 }
 

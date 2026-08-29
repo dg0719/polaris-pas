@@ -1,5 +1,4 @@
 import {
-  type InstallmentPlan,
   RatingError,
   TransitionError,
   cancellationRefundCents,
@@ -19,7 +18,7 @@ import { addMonths, isBefore, termFor } from './dates.ts';
 import { ApiError } from './errors.ts';
 import { getProduct } from './products.ts';
 import * as repo from './repo.ts';
-import type { JobRow, TenantCtx } from './repo.ts';
+import type { JobRow, PlanCode, TenantCtx } from './repo.ts';
 
 // ─── Quote shapes stored on a job ───────────────────────────────────────────
 
@@ -119,7 +118,7 @@ export function createSubmission(
     accountId: string;
     productCode: string;
     effectiveDate: string;
-    billingPlan: InstallmentPlan;
+    billingPlan: PlanCode;
     risk: RiskData;
   },
 ): JobRow {
@@ -199,7 +198,7 @@ export function createPolicyChange(
 export function createRenewal(
   db: Db,
   ctx: TenantCtx,
-  input: { policyId: string; risk?: RiskData; billingPlan?: InstallmentPlan },
+  input: { policyId: string; risk?: RiskData; billingPlan?: PlanCode },
 ): JobRow {
   const { policy, version } = requireInForcePolicy(db, ctx, input.policyId);
   const risk = input.risk ?? (JSON.parse(version.risk_json) as RiskData);

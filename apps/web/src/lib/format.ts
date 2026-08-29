@@ -1,3 +1,5 @@
+import type { PaymentPlan } from './types.ts';
+
 const CURRENCY = new Intl.NumberFormat('en-CA', {
   style: 'currency',
   currency: 'CAD',
@@ -68,18 +70,88 @@ export function relativeDays(iso: string): string {
   return `${Math.abs(days)} days ago`;
 }
 
-export function planLabel(plan: string): string {
+/**
+ * Payment plans are carrier configuration: the name and the terms come from
+ * the billing catalogue. These helpers take the catalogue when a screen has
+ * loaded it and fall back to the shipped codes when it has not.
+ */
+export function planName(plan: string, catalogue?: PlanShape[]): string {
+  const configured = catalogue?.find((entry) => entry.code === plan);
+  if (configured) return configured.name;
+  if (plan === 'full') return 'Paid in full';
+  if (plan === 'monthly') return 'Monthly';
+  if (plan === 'quarterly') return 'Quarterly';
+  return plan;
+}
+
+export function planLabel(plan: string, catalogue?: PlanShape[]): string {
+  const configured = catalogue?.find((entry) => entry.code === plan);
+  if (configured) return planNote(configured);
   if (plan === 'full') return 'One payment when cover starts';
   if (plan === 'monthly') return '12 payments, first when cover starts';
   if (plan === 'quarterly') return '4 payments, first when cover starts';
   return plan;
 }
 
-export function planName(plan: string): string {
-  if (plan === 'full') return 'Paid in full';
-  if (plan === 'monthly') return 'Monthly';
-  if (plan === 'quarterly') return 'Quarterly';
-  return plan;
+type PlanShape = Pick<
+  PaymentPlan,
+  'code' | 'name' | 'downPaymentBps' | 'installments' | 'periodicity' | 'feeBps'
+>;
+
+const CADENCE: Record<string, string> = {
+  annual: 'yearly',
+  semiannual: 'half-yearly',
+  quarterly: 'quarterly',
+  monthly: 'monthly',
+};
+
+/** How a plan reads to the person choosing it: what is due, when, and the fee. */
+export function planNote(plan: PlanShape): string {
+  const cadence = CADENCE[plan.periodicity] ?? plan.periodicity;
+  const parts: string[] = [];
+
+  if (plan.downPaymentBps > 0) {
+    parts.push(
+      `${percent(plan.downPaymentBps)} down when cover starts, then ${plan.installments} ${cadence} payments`,
+    );
+  } else if (plan.installments <= 1) {
+    parts.push('One payment when cover starts');
+  } else {
+    parts.push(`${plan.installments} ${cadence} payments, the first when cover starts`);
+  }
+
+  if (plan.feeBps > 0) parts.push(`${percent(plan.feeBps)} installment fee`);
+  return `${parts.join('. ')}.`;
+}
+
+/** Basis points as people read them: 1667 → 16.67%, 130 → 1.3%. */
+export function percent(bps: number): string {
+  return new Intl.NumberFormat('en-CA', {
+    style: 'percent',
+    maximumFractionDigits: 2,
+  }).format(bps / 10_000);
+}
+
+const FEE_NAMES: Record<string, string> = {
+  'FEE-INST': 'Installment fee',
+  'FEE-NSF': 'Returned payment fee',
+  'FEE-REINSTATE': 'Reinstatement fee',
+};
+
+const TAX_NAMES: Record<string, string> = {
+  'TAX-RST': 'Retail sales tax',
+  'TAX-QC': 'Tax on premiums',
+};
+
+/**
+ * What one line of an invoice is, in a word: the kind carries the meaning and
+ * the charge pattern names the specific fee or tax.
+ */
+export function lineLabel(line: { kind: string; patternCode: string }): string {
+  if (line.kind === 'fee') return FEE_NAMES[line.patternCode] ?? 'Fee';
+  if (line.kind === 'tax') return TAX_NAMES[line.patternCode] ?? 'Tax';
+  if (line.kind === 'downPayment') return 'Down payment';
+  return 'Premium';
 }
 
 export function useLabel(value: string): string {

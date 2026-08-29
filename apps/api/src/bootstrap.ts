@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { Role } from '@polaris/domain';
 import type { Db } from './db.ts';
 import { DEFAULT_ACCOUNTS, accountsForSecondTenant } from './demo.ts';
+import { seedBillingCatalogue } from './migrations/002_billing.ts';
 import { hashPassword } from './passwords.ts';
 import * as repo from './repo.ts';
 
@@ -13,6 +14,18 @@ import * as repo from './repo.ts';
 
 function log(message: string): void {
   process.stdout.write(`${message}\n`);
+}
+
+/**
+ * True once migration 002 has run. `openDb` always applies every migration
+ * before any bootstrap call, so this is only false when a test builds a
+ * database by hand to exercise a pre-migration state directly (see
+ * `migrations.test.ts`), skipping the migration runner on purpose.
+ */
+function hasBillingSchema(db: Db): boolean {
+  return Boolean(
+    db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'charge_patterns'`).get(),
+  );
 }
 
 export function apiKey(prefix: string): string {
@@ -31,6 +44,7 @@ export function bootstrapTenant(
   options: { usernameSuffix?: string } = {},
 ): { tenantId: string; keys: Record<Role, string> } {
   const tenant = repo.createTenant(db, name, prefix);
+  if (hasBillingSchema(db)) seedBillingCatalogue(db, tenant.id);
   const accounts = options.usernameSuffix
     ? accountsForSecondTenant(options.usernameSuffix)
     : DEFAULT_ACCOUNTS;

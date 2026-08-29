@@ -168,6 +168,13 @@
   gap: var(--s-3);
 }
 
+/* Options that each carry a sentence of terms are read down the page. A wrap
+   would size every option to its own text and leave the column ragged. */
+.choices--block {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
 .choice {
   display: flex;
   align-items: baseline;

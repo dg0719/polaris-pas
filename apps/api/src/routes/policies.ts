@@ -1,5 +1,5 @@
 import { requireAccount } from '../accounts.ts';
-import { policyBilling } from '../billing.ts';
+import { policyBilling } from '../billing/readModel.ts';
 import { todayIso } from '../dates.ts';
 import type { Db } from '../db.ts';
 import {
@@ -17,7 +17,7 @@ import * as repo from '../repo.ts';
 import type { PolicyRow, TenantCtx } from '../repo.ts';
 import {
   parseRiskData,
-  requireInstallmentPlan,
+  requirePlanCode,
   requireIsoDate,
   requireString,
 } from '../validation.ts';
@@ -103,13 +103,27 @@ export function registerPolicyRoutes(router: Router, db: Db): void {
     '/policies/:id/renewal',
     authed((ctx, tenant) => {
       const input = body(ctx);
+      const policyId = param(ctx, 'id');
+      const policy = requirePolicy(db, tenant, policyId);
+      const account = repo.getAccount(db, tenant, policy.account_id);
       const job = createRenewal(db, tenant, {
-        policyId: param(ctx, 'id'),
+        policyId,
         risk: input['risk'] === undefined ? undefined : parseRiskData(input['risk']),
+        // A renewal may move the policy onto another plan, but only onto one
+        // the carrier configured for this product and province.
         billingPlan:
           input['billingPlan'] === undefined
             ? undefined
-            : requireInstallmentPlan(input['billingPlan'], 'billingPlan'),
+            : requirePlanCode(
+                input['billingPlan'],
+                'billingPlan',
+                repo
+                  .listPaymentPlans(db, tenant, {
+                    productCode: policy.product_code,
+                    ...(account ? { province: account.province } : {}),
+                  })
+                  .map((plan) => plan.code),
+              ),
       });
       return created({ job: jobDto(job) });
     }),

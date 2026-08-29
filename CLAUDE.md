@@ -118,8 +118,8 @@ Domain facts. Getting these wrong produces confident, wasted work.
 Several early decisions were right for a first build and are now on a clock.
 They are recorded in `DECISIONS.md`; these are the ones to revisit:
 
-- **No database migrations** (D-013). Must exist before the first carrier loads
-  real data. That transition happens once and cannot be undone.
+- **Database migrations** (D-013, superseded by D-026). Done: numbered,
+  forward-only migrations exist and convert an existing database in place.
 - **Demonstration-grade sign-in** (D-014). Needs real sessions, expiry,
   revocation, password management, and eventually federated login and
   multi-factor. Not a small task; do not scope it as one.
@@ -133,18 +133,23 @@ They are recorded in `DECISIONS.md`; these are the ones to revisit:
 
 One product, Ontario personal automobile: customer accounts, quoting,
 underwriting referral with an approval guard, issue, endorsements, renewals,
-cancellations, an installment billing schedule with payments, full policy
-version history, and a working web client. Claims is built ahead of the
-roadmap's order: first notice of loss verified against the coverage in force
-on the loss date, exposures per coverage per claimant, append-only reserve
-movements, payments behind a personal authority limit with second-person
-approval, subrogation and salvage recovery, an adjuster diary and worklist,
-and fraud indicators as product configuration. Five roles: CSR, underwriter,
-adjuster, claims supervisor, admin, plus an admin Team screen that creates
-sign-ins and resets passwords. The product ships empty: first start
-bootstraps one carrier and the default sign-ins, and every piece of business
-data is entered by a person. Multi-tenant throughout, with 246 tests and two
-browser tests covering the policy path and the claims path.
+cancellations, full policy version history, and a working web client.
+Billing is a double-entry ledger: journal entries and immutable invoice
+items behind configurable payment plans (down payment, installment fee,
+tax), a billing day that bills planned invoices and posts earned premium on
+demand or on a timer, and screens rebuilt on top of it. Claims is built
+ahead of the roadmap's order: first notice of loss verified against the
+coverage in force on the loss date, exposures per coverage per claimant,
+append-only reserve movements, payments behind a personal authority limit
+with second-person approval, subrogation and salvage recovery, an adjuster
+diary and worklist, and fraud indicators as product configuration. Seven
+roles: CSR, underwriter, adjuster, claims supervisor, admin, billing,
+finance, plus an admin Team screen that creates sign-ins and resets
+passwords. The product ships empty: first start bootstraps one carrier and
+five default sign-ins (`billing` and `finance` are created from the Team
+screen), and every piece of business data is entered by a person.
+Multi-tenant throughout, with 314 tests and two browser tests covering the
+policy path and the claims path.
 
 Next: making the product model configurable enough for a second product and a
 second carrier. See `ROADMAP.md`.
@@ -176,10 +181,17 @@ not, add the test rather than relying on care.
    comes only from the caller's credentials, never from a request body or query
    parameter. All scoping happens in `apps/api/src/repo/` and nowhere else. A
    query in a service or route that is not tenant-scoped is a security defect.
-4. **The billing invariant.** For any policy,
-   `sum(non-void invoice amounts) === sum(transaction amounts)`.
-   Job types never edit invoices directly; they move the transaction total and
-   `reconcile()` pulls the schedule back onto it.
+4. **The four billing invariants.** Billing is a double-entry ledger over
+   immutable invoice items; nothing edits or deletes a posting or an item.
+   - **4a. Ledger balance.** Every journal entry's debits equal its credits;
+     `postEntry` refuses to write one that does not.
+   - **4b. Charge coverage.** Every charge's items sum to exactly the
+     charge's amount.
+   - **4c. Receivable truth.** The premium-receivable ledger balance for an
+     account equals what its live (non-void) invoice items still owe.
+   - **4d. No negative journal line.** No debit or credit is ever stored
+     negative; a reversal swaps which account is debited and which is
+     credited instead.
 5. **Policy versions are append-only.** Issuing a job writes a new immutable
    snapshot. Never edit or delete an existing version.
 6. **`packages/domain` is pure.** No file access, no network, no database, no
@@ -196,16 +208,18 @@ not, add the test rather than relying on care.
 9. **Product configuration is data, not code.** Coverages, options, factors and
    rules live in product definitions. A new product or province must never
    require changing the rating engine. This is what makes the system sellable
-   to more than one carrier.
+   to more than one carrier. The same principle covers billing: payment plans,
+   charge patterns and tax rates are tenant configuration seeded from a
+   catalogue, never a union type compiled into the server.
 10. **The API answers under `/api`.** The web client owns every other path. They
    collide otherwise: `/accounts` is both an API resource and a screen.
 11. **Claim financials are append-only movements.** The reserve on an exposure
    is the sum of its signed movement rows. Nothing edits or deletes a
    movement; a correction is a new movement with a reason.
 12. **Claims money never touches the premium ledger.** Reserves, claim
-   payments and recoveries live in the claims tables. The billing invariant
-   (4) is a statement about premium only, and a deductible recovery is a
-   claim recovery record, never an invoice.
+   payments and recoveries live in the claims tables. The four billing
+   invariants (4a–4d) are a statement about premium only, and a deductible
+   recovery is a claim recovery record, never an invoice.
 13. **No claim payment is issued above the actor's authority without a second
    person.** Every user carries a payment authority limit in cents; a payment
    above the requester's limit needs approval from someone else whose own
