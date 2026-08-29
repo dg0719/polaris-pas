@@ -1,5 +1,7 @@
 import { addDays, earnedCents, postingsFor } from '@polaris/domain';
+import { todayIso } from '../dates.ts';
 import { inTransaction, type Db } from '../db.ts';
+import { ApiError } from '../errors.ts';
 import * as repo from '../repo.ts';
 import type { PolicyRow, TenantCtx } from '../repo.ts';
 
@@ -27,7 +29,36 @@ export interface BillingDayResult {
  * left, so this bounds memory, not the day's work. */
 const BILL_BATCH = 500;
 
+/** How many policies one page of the earning loop holds. Same idea. */
+const EARNING_BATCH = 200;
+
+/**
+ * The run only ever moves forward. A date in the future would earn premium
+ * nobody has been on risk for; a date behind the last run would post earning
+ * a later snapshot has already accounted for and bill invoices out of order.
+ * Both are refused here rather than at the route, so the timer is held to the
+ * same rule. Re-running the last date is still allowed: that is the
+ * idempotent repeat, and it does nothing.
+ */
+function assertRunnable(db: Db, ctx: TenantCtx, date: string): void {
+  const today = todayIso();
+  if (date > today) {
+    throw ApiError.badRequest(
+      `Cannot run the billing day for ${date}: that date is in the future (today is ${today})`,
+      'run_date_out_of_order',
+    );
+  }
+  const latest = repo.latestBillingRun(db, ctx);
+  if (latest && date < latest.run_date) {
+    throw ApiError.badRequest(
+      `Cannot run the billing day for ${date}: this tenant has already run ${latest.run_date}`,
+      'run_date_out_of_order',
+    );
+  }
+}
+
 export function runBillingDay(db: Db, ctx: TenantCtx, date: string): BillingDayResult {
+  assertRunnable(db, ctx, date);
   return inTransaction(db, () => {
     // Inside the transaction: SQLite serialises writers, so the check and the
     // insert cannot interleave with another process's run for the same date.
@@ -51,10 +82,17 @@ export function runBillingDay(db: Db, ctx: TenantCtx, date: string): BillingDayR
  * invoice were posted when the job was issued.
  */
 function billPlannedInvoices(db: Db, ctx: TenantCtx, date: string): number {
+  // The query re-reads what the loop has just changed, so `seen` is the
+  // guarantee it terminates: a row that somehow came back a second time ends
+  // the loop rather than billing it twice.
+  const seen = new Set<string>();
   let billed = 0;
   for (;;) {
     const batch = repo.listInvoicesToBill(db, ctx, date, BILL_BATCH);
-    for (const invoice of batch) {
+    const fresh = batch.filter((invoice) => !seen.has(invoice.id));
+    if (fresh.length === 0) return billed;
+    for (const invoice of fresh) {
+      seen.add(invoice.id);
       repo.updateInvoiceStatus(db, ctx, invoice.id, 'billed');
       billed += 1;
     }
@@ -71,10 +109,19 @@ function billPlannedInvoices(db: Db, ctx: TenantCtx, date: string): number {
  */
 function recogniseEarning(db: Db, ctx: TenantCtx, date: string): number {
   let total = 0;
-  for (const policy of repo.listPolicies(db, ctx)) {
-    total += earnPolicy(db, ctx, policy, date);
+  let after: string | null = null;
+  for (;;) {
+    // Paged by id rather than read whole: a carrier's book does not fit in
+    // one array, and the run must not assume it does.
+    const ids = repo.listPolicyIdsAfter(db, ctx, after, EARNING_BATCH);
+    if (ids.length === 0) return total;
+    for (const id of ids) {
+      const policy = repo.getPolicy(db, ctx, id);
+      if (policy) total += earnPolicy(db, ctx, policy, date);
+    }
+    after = ids[ids.length - 1]!;
+    if (ids.length < EARNING_BATCH) return total;
   }
-  return total;
 }
 
 function earnPolicy(db: Db, ctx: TenantCtx, policy: PolicyRow, date: string): number {
@@ -101,7 +148,13 @@ function earnPolicy(db: Db, ctx: TenantCtx, policy: PolicyRow, date: string): nu
     const writtenCents = writtenByVersion.get(version.id) ?? 0;
     if (writtenCents === 0) continue;
 
-    const target = earnedCents(writtenCents, version.term_start, version.term_end, earnedTo);
+    // A version earns from the day it takes effect, not from the start of
+    // the term. An endorsement's transaction is already the delta for the
+    // remaining term, so earning it from `term_start` would recognise months
+    // of premium the policy was never on risk for at that price.
+    const earnFrom =
+      version.effective_date > version.term_start ? version.effective_date : version.term_start;
+    const target = earnedCents(writtenCents, earnFrom, version.term_end, earnedTo);
     const already = repo.latestEarningSnapshot(db, ctx, version.id)?.earned_cents ?? 0;
     const delta = target - already;
     if (delta === 0) continue; // never post an entry for nothing

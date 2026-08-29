@@ -46,6 +46,18 @@ export function listBillingRuns(db: Db, ctx: TenantCtx, limit = RUN_PAGE_LIMIT):
   );
 }
 
+/** The newest run this tenant has done, by the date it was run for. The
+ * billing day reads it to refuse a date behind the one it last processed. */
+export function latestBillingRun(db: Db, ctx: TenantCtx): BillingRunRow | null {
+  return one<BillingRunRow>(
+    db
+      .prepare(
+        'SELECT * FROM billing_runs WHERE tenant_id = ? ORDER BY run_date DESC LIMIT 1',
+      )
+      .get(ctx.tenantId),
+  );
+}
+
 /** Close a run out with what it did. */
 export function finishBillingRun(
   db: Db,

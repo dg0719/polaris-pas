@@ -1,3 +1,6 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, test } from 'vitest';
 import { openDb } from '../src/db.ts';
@@ -142,3 +145,33 @@ describe('migration 003 (billing and finance roles)', () => {
     expect(() => duplicate('someone.new', 'casey.reid@example.com', 'k2')).toThrow();
   });
 });
+
+describe('the foreign key gate', () => {
+  /** A row pointing at a user who does not exist. Written with foreign keys
+   * off, the way a bad migration or a hand-edited database could leave one. */
+  function withDanglingRow(file: string): void {
+    const db = new DatabaseSync(file);
+    db.exec('PRAGMA foreign_keys = OFF');
+    const tenantId = (db.prepare('SELECT id FROM tenants').get() as { id: string }).id;
+    db.exec(`INSERT INTO accounts (id, tenant_id, account_number, account_type, name, address_line1, city, province, postal_code, created_at, updated_at)
+      VALUES ('acc-x','${tenantId}','X-A0001','person','Nobody','1 St','Ottawa','ON','K1A 0A1','2026-01-01','2026-01-01')`);
+    db.exec(`INSERT INTO jobs (id, tenant_id, account_id, job_type, status, product_code, billing_plan, effective_date, term_start, term_end, risk_json, created_by, created_at, updated_at)
+      VALUES ('job-x','${tenantId}','acc-x','Submission','Draft','ON_PA','monthly','2026-09-01','2026-09-01','2027-09-01','{}','no-such-user','2026-01-01','2026-01-01')`);
+    db.close();
+  }
+
+  test('a broken foreign key fails every open, not only the first', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'polaris-fk-')), 'fk.db');
+    const first = openDb(file);
+    bootstrapTenant(first, 'Old Carrier', 'OLD');
+    first.close();
+
+    withDanglingRow(file);
+
+    // Nothing is pending any more, so the gate has to run on a no-op
+    // migration pass as well — otherwise the damage is only ever seen once.
+    expect(() => openDb(file)).toThrow(/foreign key/i);
+    expect(() => openDb(file)).toThrow(/foreign key/i);
+  });
+});
+

@@ -186,6 +186,8 @@ export function accountBillingTotals(
  * 2. **Charge coverage** — every charge's items sum to the charge.
  * 3. **Receivable truth** — the premium receivable the ledger holds for the
  *    account equals what its live items still owe.
+ * 4. **No negative journal line** — a reversal swaps the debit and credit
+ *    sides; it never posts a negative amount on the original side.
  *
  * Tests call this after every billing operation. It is deliberately a
  * function rather than a set of assertions in one test file: a new job type
@@ -199,6 +201,14 @@ export function assertBillingInvariants(db: Db, ctx: TenantCtx, accountId: strin
       `Ledger balance violated: ${unbalanced.length} journal entr${
         unbalanced.length === 1 ? 'y does' : 'ies do'
       } not balance (first: ${unbalanced[0]})`,
+    );
+  }
+
+  const negative = repo.negativeJournalLineIds(db, ctx);
+  if (negative.length > 0) {
+    throw new Error(
+      `No negative journal line violated: ${negative.length} line(s) carry a negative ` +
+        `debit or credit (first: ${negative[0]})`,
     );
   }
 

@@ -42,33 +42,38 @@ export function migrate(db: Db): { applied: number[] } {
     (db.prepare('SELECT id FROM schema_migrations').all() as { id: number }[]).map((r) => r.id),
   );
   const pending = MIGRATIONS.filter((m) => !done.has(m.id));
-  if (pending.length === 0) return { applied: [] };
-
   const enforcing = foreignKeysOn(db);
-  if (enforcing) db.exec('PRAGMA foreign_keys = OFF');
   const applied: number[] = [];
-  try {
-    for (const m of pending) {
-      db.exec('BEGIN');
-      try {
-        m.up(db);
-        db.prepare('INSERT INTO schema_migrations (id, name, applied_at) VALUES (?, ?, ?)').run(
-          m.id, m.name, new Date().toISOString());
-        db.exec('COMMIT');
-      } catch (err) {
-        db.exec('ROLLBACK');
-        throw err;
+
+  if (pending.length > 0) {
+    if (enforcing) db.exec('PRAGMA foreign_keys = OFF');
+    try {
+      for (const m of pending) {
+        db.exec('BEGIN');
+        try {
+          m.up(db);
+          db.prepare('INSERT INTO schema_migrations (id, name, applied_at) VALUES (?, ?, ?)').run(
+            m.id, m.name, new Date().toISOString());
+          db.exec('COMMIT');
+        } catch (err) {
+          db.exec('ROLLBACK');
+          throw err;
+        }
+        applied.push(m.id);
       }
-      applied.push(m.id);
+    } finally {
+      if (enforcing) db.exec('PRAGMA foreign_keys = ON');
     }
-  } finally {
-    if (enforcing) db.exec('PRAGMA foreign_keys = ON');
   }
 
-  if (enforcing && danglingRows(db) > 0) {
-    throw new Error(
-      `Migrations ${applied.join(', ')} left ${danglingRows(db)} row(s) with a broken foreign key`,
-    );
+  // Checked on every open, not only when something was applied: a database
+  // that was damaged once stays damaged, and a run with nothing pending is
+  // exactly when nobody would otherwise look.
+  if (enforcing) {
+    const dangling = danglingRows(db);
+    if (dangling > 0) {
+      throw new Error(`This database holds ${dangling} row(s) with a broken foreign key`);
+    }
   }
   return { applied };
 }

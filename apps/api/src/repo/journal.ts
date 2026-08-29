@@ -113,6 +113,22 @@ export function unbalancedEntryIds(db: Db, ctx: TenantCtx): string[] {
   return rows.map((row) => row.entry_id);
 }
 
+/**
+ * Lines carrying a negative debit or credit. A signed amount belongs on one
+ * side or the other, never as a negative on both: `postingsFor` swaps the
+ * sides for a reversal and posts the absolute value, so a negative here means
+ * something reached the table another way.
+ */
+export function negativeJournalLineIds(db: Db, ctx: TenantCtx): string[] {
+  const rows = db
+    .prepare(
+      `SELECT id FROM journal_lines
+        WHERE tenant_id = ? AND (debit_cents < 0 OR credit_cents < 0)`,
+    )
+    .all(ctx.tenantId) as unknown as { id: string }[];
+  return rows.map((row) => row.id);
+}
+
 export function listEntries(
   db: Db,
   ctx: TenantCtx,

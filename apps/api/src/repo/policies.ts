@@ -78,6 +78,31 @@ export function listPolicies(
   );
 }
 
+/**
+ * One page of policy ids, ordered by id, starting after `afterId`. The
+ * billing day walks the whole book this way: `listPolicies` would put every
+ * policy a carrier has ever written into one array.
+ */
+export function listPolicyIdsAfter(
+  db: Db,
+  ctx: TenantCtx,
+  afterId: string | null,
+  limit: number,
+): string[] {
+  const rows = (
+    afterId === null
+      ? db
+          .prepare('SELECT id FROM policies WHERE tenant_id = ? ORDER BY id ASC LIMIT ?')
+          .all(ctx.tenantId, limit)
+      : db
+          .prepare(
+            'SELECT id FROM policies WHERE tenant_id = ? AND id > ? ORDER BY id ASC LIMIT ?',
+          )
+          .all(ctx.tenantId, afterId, limit)
+  ) as unknown as { id: string }[];
+  return rows.map((row) => row.id);
+}
+
 export function setPolicyStatus(
   db: Db,
   ctx: TenantCtx,
