@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import type {
-  InstallmentPlan,
-  JobStatus,
-  JobType,
-  PolicyStatus,
-  Role,
-} from '@polaris/domain';
+import type { JobStatus, JobType, PolicyStatus, Role } from '@polaris/domain';
 
 // Re-exported so sibling repo modules import their vocabulary from one place.
-export type { InstallmentPlan, JobStatus, JobType, PolicyStatus, Role };
+export type { JobStatus, JobType, PolicyStatus, Role };
+
+/**
+ * The code of a payment plan the carrier has configured. Deliberately a string
+ * and not a union: plans are rows in `payment_plans`, so a carrier adding one
+ * must not need a type widened. The catalogue validates it at the boundary.
+ */
+export type PlanCode = string;
 
 export function newId(): string {
   return randomUUID();
@@ -75,7 +76,7 @@ export interface PolicyRow {
   policy_number: string;
   product_code: string;
   status: PolicyStatus;
-  billing_plan: InstallmentPlan;
+  billing_plan: PlanCode;
   created_at: string;
   updated_at: string;
 }
@@ -119,7 +120,7 @@ export interface JobRow {
   status: JobStatus;
   policy_id: string | null;
   product_code: string;
-  billing_plan: InstallmentPlan;
+  billing_plan: PlanCode;
   effective_date: string;
   term_start: string;
   term_end: string;

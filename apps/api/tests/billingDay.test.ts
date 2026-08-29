@@ -367,7 +367,10 @@ describe('billing routes', () => {
     const none = await call(keys['csr']!, 'GET', '/billing/plans?productCode=NOPE');
     expect((none.payload as { paymentPlans: unknown[] }).paymentPlans).toEqual([]);
 
-    expect((await call(keys['adjuster']!, 'GET', '/billing/plans')).status).toBe(403);
+    // The catalogue is product configuration, not money: every authenticated
+    // role reads it, because every role can land on a screen that names a plan.
+    expect((await call(keys['adjuster']!, 'GET', '/billing/plans')).status).toBe(200);
+    expect((await call(keys['underwriter']!, 'GET', '/billing/plans')).status).toBe(200);
   });
 
   test('GET /invoices/:id returns the lines and the postings behind them', async () => {

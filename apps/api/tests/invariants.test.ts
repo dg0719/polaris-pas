@@ -13,7 +13,7 @@ import {
   quoteJob,
 } from '../src/jobs.ts';
 import * as repo from '../src/repo.ts';
-import type { InstallmentPlan, TenantCtx } from '../src/repo.ts';
+import type { TenantCtx } from '../src/repo.ts';
 import { cleanRisk, makeAccount, makeTenant, testDb } from './helpers.ts';
 
 // ─── The three billing invariants, exercised by every job type ─────────────
@@ -42,7 +42,7 @@ function issue(plan: string, risk = cleanRisk()) {
     accountId,
     productCode: 'ON_PA',
     effectiveDate: TERM_START,
-    billingPlan: plan as InstallmentPlan,
+    billingPlan: plan,
     risk,
   });
   return runJob(job.id);

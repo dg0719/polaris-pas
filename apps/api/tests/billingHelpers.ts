@@ -6,7 +6,7 @@ import type { Db } from '../src/db.ts';
 import { issueJob } from '../src/issue.ts';
 import { bindJob, createSubmission, quoteJob } from '../src/jobs.ts';
 import * as repo from '../src/repo.ts';
-import type { AccountRow, InstallmentPlan, PolicyRow, TenantCtx } from '../src/repo.ts';
+import type { AccountRow, PolicyRow, TenantCtx } from '../src/repo.ts';
 
 // ─── Shared scaffolding for the billing test files ─────────────────────────
 // `billing.test.ts` and `billingCancellation.test.ts` drive the same product
@@ -16,9 +16,9 @@ import type { AccountRow, InstallmentPlan, PolicyRow, TenantCtx } from '../src/r
 export const TERM_START = '2026-09-01';
 
 /**
- * Any code in the payment-plan catalogue. Task 15 widens `InstallmentPlan` to
- * exactly this; until then the cast is the only way to reach a plan the old
- * three-value union never knew about.
+ * The plans these tests drive. The server accepts any code the catalogue
+ * holds; naming them here keeps a typo in a test from quietly becoming a
+ * different scenario.
  */
 export type PlanCode = 'full' | 'monthly' | 'quarterly' | 'monthly-2down';
 
@@ -39,7 +39,7 @@ export function issueSubmission(
     accountId: input.accountId,
     productCode: 'ON_PA',
     effectiveDate: TERM_START,
-    billingPlan: input.plan as InstallmentPlan,
+    billingPlan: input.plan,
     risk: input.risk,
   });
   return runJob(db, ctx, job.id);

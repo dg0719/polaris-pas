@@ -1,7 +1,7 @@
 import type { Db } from '../db.ts';
 import { many, newId, nowIso, one } from './shared.ts';
 import type {
-  InstallmentPlan,
+  PlanCode,
   PolicyRow,
   PolicyStatus,
   PolicyVersionRow,
@@ -17,7 +17,7 @@ export function insertPolicy(
     accountId: string;
     policyNumber: string;
     productCode: string;
-    billingPlan: InstallmentPlan;
+    billingPlan: PlanCode;
   },
 ): PolicyRow {
   const ts = nowIso();

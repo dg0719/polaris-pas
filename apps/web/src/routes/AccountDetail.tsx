@@ -110,6 +110,13 @@ export function AccountDetail({ accountId }: { accountId: string }) {
           <Fact label="Policies">
             {rollup ? `${rollup.inForceCount} in force of ${rollup.policyCount}` : '—'}
           </Fact>
+          {/* Only shown when there is money on the account no invoice has claimed. */}
+          {rollup && rollup.unappliedCents > 0 ? (
+            <Fact label="Credit on account">
+              <Money cents={rollup.unappliedCents} />
+              <span className="cell-sub">Applies to the next invoice billed.</span>
+            </Fact>
+          ) : null}
         </Facts>
       </Section>
 
@@ -287,10 +294,15 @@ export function AccountDetail({ accountId }: { accountId: string }) {
                           <Status value={invoice.status} />
                         </td>
                         <td className="num">
-                          <Money cents={invoice.amountCents} delta={invoice.amountCents < 0} />
+                          <Money cents={invoice.totalCents} balance />
                         </td>
                         <td className="num">
-                          {invoice.status === 'void' ? '—' : money(invoice.outstandingCents)}
+                          {/* A credit note reads as a credit, never as a minus. */}
+                          {invoice.status === 'void' ? (
+                            '—'
+                          ) : (
+                            <Money cents={invoice.outstandingCents} balance />
+                          )}
                         </td>
                       </tr>
                     ))}

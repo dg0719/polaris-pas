@@ -18,7 +18,7 @@ import {
   parseAccountInput,
   parsePaymentInput,
   parseRiskData,
-  requireInstallmentPlan,
+  requirePlanCode,
   requireIsoDate,
   requireString,
 } from '../validation.ts';
@@ -88,11 +88,22 @@ export function registerAccountRoutes(router: Router, db: Db): void {
     '/accounts/:id/submissions',
     authed((ctx, tenant) => {
       const input = body(ctx);
+      const accountId = param(ctx, 'id');
+      const account = requireAccount(db, tenant, accountId);
+      const productCode = requireString(input['productCode'], 'productCode');
       const job = createSubmission(db, tenant, {
-        accountId: param(ctx, 'id'),
-        productCode: requireString(input['productCode'], 'productCode'),
+        accountId,
+        productCode,
         effectiveDate: requireIsoDate(input['effectiveDate'], 'effectiveDate'),
-        billingPlan: requireInstallmentPlan(input['billingPlan'], 'billingPlan'),
+        // The plans offered on this product in this province, and nothing else:
+        // the same filter the quote wizard asked the catalogue for.
+        billingPlan: requirePlanCode(
+          input['billingPlan'],
+          'billingPlan',
+          repo
+            .listPaymentPlans(db, tenant, { productCode, province: account.province })
+            .map((plan) => plan.code),
+        ),
         risk: parseRiskData(input['risk']),
       });
       return created({ job: jobDto(job) });

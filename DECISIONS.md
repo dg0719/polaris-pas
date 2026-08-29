@@ -480,3 +480,36 @@ points at nothing and only find out at the end of the run. The check turns
 that into a loud failure rather than silent corruption, but it arrives after
 the fact.
 
+
+---
+
+## D-024 · A payment plan code is any code the carrier configured, not a union
+
+**2026-08-29**
+
+`billingPlan` arriving over HTTP is checked against
+`listPaymentPlans(db, tenant, { productCode, province })` — the same filtered
+catalogue the quote wizard asked for — instead of against a three-value
+`'full' | 'monthly' | 'quarterly'` union compiled into the server. The row
+types in `apps/api/src/repo/shared.ts` carry `PlanCode`, a string, for the
+same reason. `/billing/plans` also lost its role list: it answers to any
+authenticated role.
+
+**Instead of:** widening the union each time a plan is added, which is what
+the old `requireInstallmentPlan` forced. The quote wizard reads its choices
+from the catalogue, so the server rejecting a plan the wizard had just
+offered was a live defect the moment the fourth plan appeared: a CSR
+selecting "Two months down, 10 monthly" got
+`billingPlan must be one of full, monthly, quarterly`.
+
+**Why:** invariant 9 — product configuration is data — is not true of payment
+plans if adding one needs a type widened and a deploy. The catalogue is the
+only thing that knows what a carrier sells, so it is the only thing that may
+validate it. Filtering by product *and* province keeps the boundary as strict
+as the screen: a plan filed for Ontario cannot be quoted on an Alberta
+account.
+
+**Deliberate residue:** `InstallmentPlan` and the equal-split helpers in
+`packages/domain/src/billing.ts` are now unused by the API — the catalogue-
+driven scheduler replaced them. They are left in place rather than deleted in
+a screens task.

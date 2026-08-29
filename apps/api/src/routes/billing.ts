@@ -56,21 +56,22 @@ export function registerBillingRoutes(router: Router, db: Db): void {
   );
 
   // The catalogue behind the quote wizard's plan choice and the finance
-  // screens: what a carrier may bill, on what plan, with what tax.
+  // screens: what a carrier may bill, on what plan, with what tax. Any
+  // authenticated role: an underwriter quotes on a plan and an adjuster
+  // reading a policy sees the plan it is billed on, so a narrower gate would
+  // break those screens for no gain — this is product configuration, the same
+  // class of data as the product definition, not anyone's money.
   router.get(
     '/billing/plans',
-    authed(
-      (ctx, tenant) => {
-        const productCode = ctx.query.get('productCode') ?? undefined;
-        const province = ctx.query.get('province') ?? undefined;
-        return {
-          paymentPlans: repo.listPaymentPlans(db, tenant, { productCode, province }),
-          chargePatterns: repo.listChargePatterns(db, tenant),
-          taxRates: repo.listTaxRates(db, tenant),
-        };
-      },
-      ['admin', 'finance', 'billing', 'csr'],
-    ),
+    authed((ctx, tenant) => {
+      const productCode = ctx.query.get('productCode') ?? undefined;
+      const province = ctx.query.get('province') ?? undefined;
+      return {
+        paymentPlans: repo.listPaymentPlans(db, tenant, { productCode, province }),
+        chargePatterns: repo.listChargePatterns(db, tenant),
+        taxRates: repo.listTaxRates(db, tenant),
+      };
+    }),
   );
 
   // What one invoice is worth, what it is made of, and the postings behind

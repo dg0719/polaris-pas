@@ -177,6 +177,40 @@ describe('accounts', () => {
     expect(res.status).toBe(400);
   });
 
+  // The catalogue is the authority on what may be quoted. A plan the carrier
+  // configured must be quotable without the server being changed, or "product
+  // configuration is data" is not true of payment plans.
+  test('a configured plan outside the three shipped codes is accepted', async () => {
+    const accountId = await createAccount();
+    const res = await call('POST', `/accounts/${accountId}/submissions`, {
+      key: keys['csr'],
+      body: {
+        productCode: 'ON_PA',
+        effectiveDate: '2026-09-01',
+        billingPlan: 'monthly-2down',
+        risk: cleanRisk(),
+      },
+    });
+    expect(res.status).toBe(201);
+    expect(rec(res.body['job'])['billingPlan']).toBe('monthly-2down');
+  });
+
+  // Plans are filtered by product and by the account's province, so a plan
+  // configured for Ontario cannot be quoted on an Alberta account.
+  test('a plan not configured for the account province is rejected', async () => {
+    const accountId = await createAccount({ province: 'AB', postalCode: 'T2P 1J9' });
+    const res = await call('POST', `/accounts/${accountId}/submissions`, {
+      key: keys['csr'],
+      body: {
+        productCode: 'ON_PA',
+        effectiveDate: '2026-09-01',
+        billingPlan: 'monthly-2down',
+        risk: cleanRisk(),
+      },
+    });
+    expect(res.status).toBe(400);
+  });
+
   test('a submission for an account in another tenant is a 404', async () => {
     const accountId = await createAccount();
     const other = makeTenant(db, 'Northstar Mutual', 'NSTR');
