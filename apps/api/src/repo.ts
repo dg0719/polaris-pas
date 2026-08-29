@@ -12,6 +12,7 @@ export * from './repo/billingConfig.ts';
 export * from './repo/journal.ts';
 export * from './repo/billingItems.ts';
 export * from './repo/billingInvoices.ts';
+export * from './repo/billingRuns.ts';
 export * from './repo/claims.ts';
 export * from './repo/claimMoney.ts';
 export * from './repo/claimTasks.ts';

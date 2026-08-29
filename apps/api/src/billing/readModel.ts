@@ -133,6 +133,20 @@ export function policyBilling(
   return { plan: policy.billing_plan, invoices, ...totalsOf(invoices, today) };
 }
 
+/** One invoice with its lines and what it is worth. Null when the invoice
+ * belongs to another tenant or does not exist — the repository read is what
+ * decides that, not the caller. */
+export function invoiceView(
+  db: Db,
+  ctx: TenantCtx,
+  invoiceId: string,
+  today: string,
+): InvoiceView | null {
+  const invoice = repo.getInvoice(db, ctx, invoiceId);
+  if (!invoice) return null;
+  return viewOf(invoice, repo.listItemsForInvoice(db, ctx, invoiceId), today);
+}
+
 /** Every invoice on an account, newest schedule last, ready for a statement. */
 export function accountInvoices(
   db: Db,

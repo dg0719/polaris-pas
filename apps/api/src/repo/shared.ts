@@ -412,3 +412,27 @@ export interface ClaimTaskRow {
   created_at: string;
   updated_at: string;
 }
+
+// ─── The billing day ───────────────────────────────────────────────────────
+
+export interface BillingRunRow {
+  id: string;
+  tenant_id: string;
+  run_date: string;
+  started_at: string;
+  finished_at: string | null;
+  summary_json: string;
+}
+
+/** What one policy version had earned as at `as_of`. Cumulative, never a
+ * delta: the billing day posts the difference between two of these. */
+export interface EarningSnapshotRow {
+  id: string;
+  tenant_id: string;
+  policy_version_id: string;
+  policy_id: string;
+  as_of: string;
+  written_cents: number;
+  earned_cents: number;
+  created_at: string;
+}

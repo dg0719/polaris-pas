@@ -7,7 +7,9 @@ export type Role =
   | 'underwriter'
   | 'adjuster'
   | 'claims_supervisor'
-  | 'admin';
+  | 'admin'
+  | 'billing'
+  | 'finance';
 
 export type JobType = 'Submission' | 'PolicyChange' | 'Renewal' | 'Cancellation';
 

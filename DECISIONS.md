@@ -450,3 +450,33 @@ test scaffolding that never touches a real database.
 **Deliberate residue:** the invented names still exist inside the test tree.
 Removing them from the tests too would be a large rewrite for no
 user-visible gain.
+
+---
+
+## D-023 · Migrations run with foreign keys switched off, then prove nothing broke
+
+**2026-08-28**
+
+`migrate()` turns `PRAGMA foreign_keys` off for the length of a run and back
+on afterwards, then fails the run if `PRAGMA foreign_key_check` reports a
+single dangling row. Migration 003 needs it: SQLite cannot alter a CHECK
+constraint in place, so widening the roles on `users` means rebuilding the
+table, and nine tables hold a foreign key to `users(id)`.
+
+**Instead of:** `PRAGMA defer_foreign_keys = ON` inside the migration, which
+is the only foreign-key pragma that does anything inside a transaction. It
+does not work here: dropping the parent table records one deferred violation
+per child row, and renaming the replacement into place never clears them, so
+the COMMIT fails. `PRAGMA writable_schema` — editing the stored CREATE
+statement directly — is refused outright by `node:sqlite`.
+
+**Why:** it is the procedure SQLite's own documentation prescribes for
+rebuilding a table, and the `foreign_key_check` afterwards is a stronger
+guarantee than per-statement enforcement would have given: it inspects every
+row in the database rather than only the ones a statement touched.
+
+**Deliberate residue:** a migration can now write a row whose foreign key
+points at nothing and only find out at the end of the run. The check turns
+that into a loud failure rather than silent corruption, but it arrives after
+the fact.
+

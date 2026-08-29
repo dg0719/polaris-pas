@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Db } from './db.ts';
 import { HttpResult, Router, errorResponse, readJsonBody, sendJson } from './http.ts';
 import { registerAccountRoutes } from './routes/accounts.ts';
+import { registerBillingRoutes } from './routes/billing.ts';
 import { registerClaimRoutes } from './routes/claims.ts';
 import { registerJobRoutes } from './routes/jobs.ts';
 import { registerDemoRoutes, registerMetaRoutes } from './routes/meta.ts';
@@ -11,6 +12,10 @@ import type { StaticSite } from './static.ts';
 
 export function buildRouter(db: Db): Router {
   const router = new Router();
+  // First: the router takes the first route whose literal segments match, so
+  // `/billing/run` and `/invoices/:id` must be seen before anything with a
+  // `/:id` in the same position could swallow them.
+  registerBillingRoutes(router, db);
   registerMetaRoutes(router, db);
   registerDemoRoutes(router, db);
   registerAccountRoutes(router, db);

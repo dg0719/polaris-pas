@@ -1,4 +1,11 @@
-export type Role = 'csr' | 'underwriter' | 'adjuster' | 'claims_supervisor' | 'admin';
+export type Role =
+  | 'csr'
+  | 'underwriter'
+  | 'adjuster'
+  | 'claims_supervisor'
+  | 'admin'
+  | 'billing'
+  | 'finance';
 export type InstallmentPlan = 'full' | 'monthly' | 'quarterly';
 export type JobStatus = 'Draft' | 'Quoted' | 'Bound' | 'Issued' | 'Declined' | 'Withdrawn';
 export type JobType = 'Submission' | 'PolicyChange' | 'Renewal' | 'Cancellation';

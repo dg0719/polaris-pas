@@ -3,6 +3,7 @@ import { readQuote, readRisk } from './jobs.ts';
 import type {
   AccountRow,
   JobEventRow,
+  JournalEntryRow,
   JobRow,
   PaymentRow,
   PolicyRow,
@@ -138,6 +139,21 @@ export function invoiceDto(invoice: InvoiceView) {
       amountCents: line.amount_cents,
       paidCents: line.paid_cents,
     })),
+  };
+}
+
+/** A journal entry as the API shows it: what happened, when, and to what.
+ * The lines behind it are the GL export's job, not a screen's. */
+export function journalEntryDto(entry: JournalEntryRow) {
+  return {
+    id: entry.id,
+    postedAt: entry.posted_at,
+    effectiveDate: entry.effective_date,
+    eventType: entry.event_type,
+    referenceKind: entry.reference_kind,
+    referenceId: entry.reference_id,
+    reversalOf: entry.reversal_of,
+    reason: entry.reason,
   };
 }
 

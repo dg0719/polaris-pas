@@ -77,3 +77,68 @@ describe('migrations', () => {
     expectTenantIdIsTypedForeignKey(db, 'journal_lines');
   });
 });
+
+describe('migration 003 (billing and finance roles)', () => {
+  /** A v5 database — baseline plus billing — with one tenant, its five
+   * sign-ins, and a job whose `created_by` points at one of them. This is the
+   * shape migration 003 has to rebuild the `users` table underneath. */
+  function v5Database(): { db: DatabaseSync; tenantId: string; userId: string } {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)`);
+    MIGRATIONS[0]!.up(db);
+    MIGRATIONS[1]!.up(db);
+    db.prepare('INSERT INTO schema_migrations (id, name, applied_at) VALUES (?, ?, ?)').run(1, 'baseline', '2026-01-01');
+    db.prepare('INSERT INTO schema_migrations (id, name, applied_at) VALUES (?, ?, ?)').run(2, 'billing', '2026-01-01');
+    bootstrapTenant(db, 'Old Carrier', 'OLD');
+    const tenantId = (db.prepare('SELECT id FROM tenants').get() as { id: string }).id;
+    const userId = (db.prepare(`SELECT id FROM users WHERE role = 'csr'`).get() as { id: string }).id;
+    db.exec(`INSERT INTO accounts (id, tenant_id, account_number, account_type, name, address_line1, city, province, postal_code, created_at, updated_at)
+      VALUES ('acc1','${tenantId}','OLD-A0001','person','Legacy Person','1 St','Ottawa','ON','K1A 0A1','2026-01-01','2026-01-01')`);
+    db.exec(`INSERT INTO jobs (id, tenant_id, account_id, job_type, status, product_code, billing_plan, effective_date, term_start, term_end, risk_json, created_by, created_at, updated_at)
+      VALUES ('job1','${tenantId}','acc1','Submission','Draft','ON_PA','monthly','2026-09-01','2026-09-01','2027-09-01','{}','${userId}','2026-01-01','2026-01-01')`);
+    return { db, tenantId, userId };
+  }
+
+  test('a database with a job referencing a user migrates cleanly', () => {
+    const { db, userId } = v5Database();
+
+    expect(migrate(db).applied).toEqual([3]);
+
+    // Every sign-in survived the table rebuild, and the job still resolves
+    // to the user that created it through the foreign key.
+    expect((db.prepare('SELECT count(*) AS n FROM users').get() as { n: number }).n).toBe(5);
+    const joined = db.prepare('SELECT u.username FROM jobs j JOIN users u ON u.id = j.created_by WHERE j.id = ?').get('job1') as { username: string };
+    expect(joined.username).toBe('csr');
+    expect(db.prepare('SELECT id FROM jobs WHERE created_by = ?').get(userId)).toBeTruthy();
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+
+  test('the widened CHECK accepts billing and finance and still refuses nonsense', () => {
+    const { db, tenantId } = v5Database();
+    migrate(db);
+
+    const insert = (id: string, role: string) =>
+      db.prepare(`INSERT INTO users (id, tenant_id, username, email, name, role, password_hash, password_salt, api_key, authority_limit_cents, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'h', 's', ?, 0, '2026-01-01')`).run(id, tenantId, id, `${id}@example.com`, id, role, `key-${id}`);
+
+    insert('u-billing', 'billing');
+    insert('u-finance', 'finance');
+    expect(() => insert('u-nope', 'wizard')).toThrow();
+  });
+
+  test('the rebuilt users table keeps its indexes and uniqueness', () => {
+    const { db, tenantId } = v5Database();
+    migrate(db);
+
+    const indexes = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'users'`).all() as { name: string }[];
+    expect(indexes.map((i) => i.name)).toContain('users_tenant_email');
+
+    // The two column-level UNIQUE constraints still bite.
+    const duplicate = (username: string, email: string, key: string) =>
+      db.prepare(`INSERT INTO users (id, tenant_id, username, email, name, role, password_hash, password_salt, api_key, authority_limit_cents, created_at)
+        VALUES (?, ?, ?, ?, 'X', 'billing', 'h', 's', ?, 0, '2026-01-01')`).run(`id-${key}`, tenantId, username, email, key);
+    expect(() => duplicate('csr', 'new@example.com', 'k1')).toThrow();
+    expect(() => duplicate('someone.new', 'casey.reid@example.com', 'k2')).toThrow();
+  });
+});

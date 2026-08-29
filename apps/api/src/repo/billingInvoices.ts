@@ -70,6 +70,28 @@ export function listInvoicesForAccount(db: Db, ctx: TenantCtx, accountId: string
   );
 }
 
+/**
+ * Planned invoices whose bill date has arrived, oldest first — what the
+ * billing day sends out. Limited: the caller repeats until nothing is left,
+ * so a carrier's whole book never lands in memory at once.
+ */
+export function listInvoicesToBill(
+  db: Db,
+  ctx: TenantCtx,
+  date: string,
+  limit: number,
+): BillingInvoiceRow[] {
+  return many<BillingInvoiceRow>(
+    db
+      .prepare(
+        `SELECT * FROM billing_invoices
+          WHERE tenant_id = ? AND status = 'planned' AND bill_date <= ?
+          ORDER BY bill_date ASC, sequence ASC LIMIT ?`,
+      )
+      .all(ctx.tenantId, date, limit),
+  );
+}
+
 export function updateInvoiceStatus(
   db: Db,
   ctx: TenantCtx,
