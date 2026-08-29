@@ -8,8 +8,8 @@ import {
   DAYS_UNTIL_DUE,
   ensureStream,
   insertCharge,
-  outstandingOn,
   postCharge,
+  premiumOutstandingOn,
   taxRateOn,
   total,
   totalOn,
@@ -47,7 +47,7 @@ export function respreadSchedule(
     planned.map((i) => ({
       invoiceId: i.id,
       eventDate: i.event_date,
-      outstandingCents: outstandingOn(db, ctx, i.id),
+      outstandingCents: premiumOutstandingOn(db, ctx, i.id, premiumCharge.pattern_code),
     })),
   );
 
@@ -92,8 +92,12 @@ export function respreadSchedule(
   const placed = [...premiumSlices, ...taxSlicesFor(db, ctx, c, instructionId, premiumSlices)];
   writeItems(db, ctx, c, placed);
 
+  const touched = [...new Set(placed.map((p) => p.invoiceId))];
+  const reversals = reverseEmptiedInvoices(db, ctx, c, instructionId, touched, premiumCharge);
+  writeItems(db, ctx, c, reversals);
+
   // An invoice the change emptied has nothing left to collect.
-  for (const invoiceId of new Set(placed.map((p) => p.invoiceId))) {
+  for (const invoiceId of touched) {
     const invoice = repo.getInvoice(db, ctx, invoiceId);
     if (invoice && invoice.status !== 'void' && totalOn(db, ctx, invoiceId) === 0) {
       repo.updateInvoiceStatus(db, ctx, invoiceId, 'void');
@@ -103,10 +107,92 @@ export function respreadSchedule(
   // A zero-delta change writes no items and no charges; `postCharge` skips
   // the zero-amount premium charge for the same reason.
   postCharge(db, ctx, premiumCharge);
-  for (const charge of new Map(placed.map((p) => [p.charge.id, p.charge])).values()) {
+  const written = [...placed, ...reversals];
+  for (const charge of new Map(written.map((p) => [p.charge.id, p.charge])).values()) {
     if (charge.id !== premiumCharge.id) postCharge(db, ctx, charge);
   }
   return raised;
+}
+
+/**
+ * An invoice whose premium has been reduced to nothing collects no
+ * installment fee and no tax either: the fee buys an installment, and there
+ * is no longer one to buy. Reverse whatever those lines still hold so the
+ * invoice nets to zero and can be voided.
+ *
+ * The reversal is written on the net remaining per pattern rather than one
+ * item per original line, because the tax on the premium reduction has
+ * already been written by `taxSlicesFor` — reversing per line would take it
+ * off twice. An invoice only partly reduced keeps its fee and its tax.
+ */
+function reverseEmptiedInvoices(
+  db: Db,
+  ctx: TenantCtx,
+  c: Context,
+  instructionId: string,
+  invoiceIds: string[],
+  premiumCharge: ChargeRow,
+): Placed[] {
+  interface Reversal {
+    invoiceId: string;
+    kind: 'fee' | 'tax';
+    patternCode: string;
+    amountCents: number;
+    eventDate: string;
+  }
+  const reversals: Reversal[] = [];
+
+  for (const invoiceId of invoiceIds) {
+    const items = repo.listItemsForInvoice(db, ctx, invoiceId);
+    const premiumLeft = items
+      .filter((i) => i.pattern_code === premiumCharge.pattern_code)
+      .reduce((sum, i) => sum + i.amount_cents - i.paid_cents, 0);
+    if (premiumLeft !== 0) continue;
+
+    for (const kind of ['fee', 'tax'] as const) {
+      const remaining = new Map<string, { amountCents: number; eventDate: string }>();
+      for (const item of items.filter((i) => i.kind === kind)) {
+        const at = remaining.get(item.pattern_code) ?? {
+          amountCents: 0,
+          eventDate: item.event_date,
+        };
+        at.amountCents += item.amount_cents - item.paid_cents;
+        remaining.set(item.pattern_code, at);
+      }
+      for (const [patternCode, at] of remaining) {
+        if (at.amountCents === 0) continue;
+        reversals.push({
+          invoiceId,
+          kind,
+          patternCode,
+          amountCents: -at.amountCents,
+          eventDate: at.eventDate,
+        });
+      }
+    }
+  }
+
+  // One charge per pattern being reversed, so charge coverage still holds
+  // per charge. Nothing to reverse means no charge at all — never a zero one.
+  const charges = new Map<string, ChargeRow>();
+  for (const patternCode of new Set(reversals.map((r) => r.patternCode))) {
+    const amount = reversals
+      .filter((r) => r.patternCode === patternCode)
+      .reduce((sum, r) => sum + r.amountCents, 0);
+    charges.set(patternCode, insertCharge(db, ctx, c, instructionId, patternCode, amount));
+  }
+
+  return reversals.map((r) => ({
+    invoiceId: r.invoiceId,
+    charge: charges.get(r.patternCode)!,
+    item: {
+      kind: r.kind,
+      patternCode: r.patternCode,
+      amountCents: r.amountCents,
+      eventDate: r.eventDate,
+      sequence: 1, // `writeItems` assigns the real sequence on the invoice
+    },
+  }));
 }
 
 /** The tax due on the delta's premium slices, on a charge of its own. */

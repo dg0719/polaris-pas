@@ -16,7 +16,7 @@ describe('splitRemainderLast', () => {
 });
 
 describe('sliceCharge', () => {
-  const base = { amountCents: 120_005, patternCode: 'PREMIUM', termStart: '2026-09-01', instructionType: 'newBusiness' as const };
+  const base = { amountCents: 120_005, patternCode: 'PREMIUM', termStart: '2026-09-01', termMonths: 12, instructionType: 'newBusiness' as const };
 
   test('12 monthly installments start at inception and sum to the charge', () => {
     const items = sliceCharge({ ...base, plan: monthly, feePattern: null });
@@ -61,6 +61,32 @@ describe('sliceCharge', () => {
 
   test('a plan with zero installments is refused rather than silently dropping the charge', () => {
     expect(() => sliceCharge({ ...base, plan: { ...monthly, installments: 0 }, feePattern: null })).toThrow(PlanDefinitionError);
+  });
+
+  test('a shorter term gets proportionally fewer installments', () => {
+    // The catalogue states each plan's count for a 12-month term.
+    const halfYear = { ...base, termMonths: 6 };
+    const monthlyItems = sliceCharge({ ...halfYear, plan: monthly, feePattern: null });
+    expect(monthlyItems).toHaveLength(6);
+    expect(monthlyItems.reduce((s, i) => s + i.amountCents, 0)).toBe(120_005);
+    expect(monthlyItems.at(-1)!.eventDate).toBe('2027-02-01');
+
+    const quarterly: PaymentPlanDef = { ...monthly, code: 'quarterly', installments: 4, periodicity: 'quarterly' };
+    expect(sliceCharge({ ...halfYear, plan: quarterly, feePattern: null })).toHaveLength(2);
+
+    const twoDownItems = sliceCharge({ ...halfYear, plan: twoDown, feePattern: FEE });
+    expect(twoDownItems.filter((i) => i.kind === 'installment')).toHaveLength(5);
+    expect(twoDownItems.filter((i) => i.kind === 'downPayment')).toHaveLength(1);
+    expect(
+      twoDownItems.filter((i) => i.patternCode === 'PREMIUM').reduce((s, i) => s + i.amountCents, 0),
+    ).toBe(120_005);
+  });
+
+  test('a term shorter than the plan cadence still bills once', () => {
+    const quarterly: PaymentPlanDef = { ...monthly, code: 'quarterly', installments: 4, periodicity: 'quarterly' };
+    const items = sliceCharge({ ...base, termMonths: 1, plan: quarterly, feePattern: null });
+    expect(items).toHaveLength(1);
+    expect(items[0]!.amountCents).toBe(120_005);
   });
 
   test('a fee above the regulatory cap is refused even on a negative charge', () => {

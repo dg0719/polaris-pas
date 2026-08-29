@@ -16,6 +16,9 @@ export interface SliceInput {
   amountCents: number;
   patternCode: string;
   termStart: string;
+  /** Length of the term being billed. A plan's `installments` describes a
+   * 12-month term, so a six-month term gets half as many. */
+  termMonths: number;
   plan: PaymentPlanDef;
   instructionType: InstructionType;
   feePattern: ChargePatternDef | null;
@@ -42,6 +45,16 @@ function validatePlan(plan: PaymentPlanDef): void {
 }
 
 /**
+ * How many installments this plan produces over a term of `termMonths`. The
+ * catalogue states each plan's count for a 12-month term, so a six-month term
+ * on the monthly plan bills six times, not twelve. Never fewer than one: a
+ * term shorter than the plan's cadence still has to be billed.
+ */
+function installmentsFor(plan: PaymentPlanDef, termMonths: number): number {
+  return Math.max(1, Math.round((plan.installments * termMonths) / 12));
+}
+
+/**
  * Slice a charge into invoice items: a down payment at inception (if the
  * plan has one), equal installments on the plan's cadence with the rounding
  * remainder on the last, and the installment fee spread over the
@@ -61,7 +74,7 @@ export function sliceCharge(input: SliceInput): SlicedItem[] {
   }
 
   const firstOffset = down !== 0 ? 1 : 0;
-  const parts = splitRemainderLast(input.amountCents - down, plan.installments);
+  const parts = splitRemainderLast(input.amountCents - down, installmentsFor(plan, input.termMonths));
   const dates = parts.map((_, i) => addMonths(input.termStart, (i + firstOffset) * MONTHS[plan.periodicity]));
   parts.forEach((amountCents, i) => {
     items.push({ kind: 'installment', patternCode: input.patternCode, amountCents, eventDate: dates[i]!, sequence: sequence++ });

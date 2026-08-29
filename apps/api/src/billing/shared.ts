@@ -60,6 +60,8 @@ export interface Context extends ApplyIssuedJobInput {
   plan: PaymentPlanDef;
   product: ProductDefinition;
   province: string;
+  /** Length of the term being billed, from the job's risk. */
+  termMonths: number;
 }
 
 /** An item, the charge it belongs to, and the invoice it is placed on. */
@@ -77,10 +79,22 @@ export function totalOn(db: Db, ctx: TenantCtx, invoiceId: string): number {
   return repo.listItemsForInvoice(db, ctx, invoiceId).reduce((sum, i) => sum + i.amount_cents, 0);
 }
 
-/** What an invoice can still give up: its items less what has been paid. */
-export function outstandingOn(db: Db, ctx: TenantCtx, invoiceId: string): number {
+/**
+ * What an invoice's premium can still give up: its premium items less what
+ * has been paid against them. Return premium may only reduce premium — the
+ * installment fee and the tax on it are reversed separately, and only when
+ * the premium is gone altogether — so the fee must not appear here or a
+ * refund would silently eat it.
+ */
+export function premiumOutstandingOn(
+  db: Db,
+  ctx: TenantCtx,
+  invoiceId: string,
+  premiumPatternCode: string,
+): number {
   return repo
     .listItemsForInvoice(db, ctx, invoiceId)
+    .filter((i) => i.pattern_code === premiumPatternCode)
     .reduce((sum, i) => sum + i.amount_cents - i.paid_cents, 0);
 }
 

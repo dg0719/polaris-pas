@@ -59,6 +59,29 @@ function runJob(jobId: string) {
   return issueJob(db, csr, jobId);
 }
 
+/**
+ * An account in a province that taxes the line. Ontario exempts automobile
+ * from retail sales tax, so this is the only way to reach the tax path
+ * today. The tax rate comes from the `tax_rates` catalogue keyed on the
+ * account's province and the product's line — configuration, not code. (The
+ * rating tables are still Ontario's; a Quebec product arrives with the
+ * second product.)
+ */
+function quebecAccount() {
+  return createAccount(db, csr, {
+    account_type: 'person',
+    name: 'Marie Tremblay',
+    email: null,
+    phone: null,
+    address_line1: '1 rue Sainte-Catherine',
+    address_line2: null,
+    city: 'Montréal',
+    province: 'QC',
+    postal_code: 'H3B 1A1',
+    producer_code: null,
+  });
+}
+
 /** What an invoice is worth: the sum of the items placed on it. */
 function invoiceTotal(invoiceId: string): number {
   return repo.listItemsForInvoice(db, csr, invoiceId).reduce((sum, i) => sum + i.amount_cents, 0);
@@ -139,6 +162,19 @@ describe('schedule generation', () => {
     invariants(policy);
   });
 
+  test('a six-month term bills six monthly invoices, all inside the term', () => {
+    // The plan catalogue states its installment count for a 12-month term.
+    const halfYear = cleanRisk();
+    halfYear.termMonths = 6;
+    const { job, policy } = issue('monthly', halfYear);
+    const invoices = repo.listInvoicesForPolicy(db, csr, policy.id);
+    expect(invoices).toHaveLength(6);
+    expect(invoices[0]!.due_date).toBe('2026-09-01');
+    expect(invoices.at(-1)!.due_date).toBe('2027-02-01');
+    expect(invoices.at(-1)!.due_date < job.term_end).toBe(true);
+    invariants(policy);
+  });
+
   test('the premium charge posts receivable against unearned premium', () => {
     const { policy, transaction } = issue('full');
     expect(repo.accountBalance(db, csr, '1100', { policyId: policy.id })).toBe(
@@ -162,25 +198,7 @@ describe('schedule generation', () => {
   });
 
   test('where the province taxes the line, tax is its own charge and posts to tax payable', () => {
-    // Ontario exempts automobile from retail sales tax, so the only way to
-    // reach the tax path today is an account in a province that does not.
-    // The rate comes from the tax_rates catalogue keyed on the account's
-    // province and the product's line — configuration, not code. (The rate
-    // tables are Ontario's; this exercises the tax wiring, not a Quebec
-    // product, which arrives with the second product.)
-    const quebec = createAccount(db, csr, {
-      account_type: 'person',
-      name: 'Marie Tremblay',
-      email: null,
-      phone: null,
-      address_line1: '1 rue Sainte-Catherine',
-      address_line2: null,
-      city: 'Montréal',
-      province: 'QC',
-      postal_code: 'H3B 1A1',
-      producer_code: null,
-    });
-    const { policy, transaction } = issue('full', cleanRisk(), quebec.id);
+    const { policy, transaction } = issue('full', cleanRisk(), quebecAccount().id);
     const expected = Math.round((transaction.amount_cents * 900) / 10_000);
 
     const items = repo.listItemsForPolicy(db, csr, policy.id);
@@ -281,8 +299,18 @@ describe('endorsements move the schedule', () => {
   });
 });
 
+
 describe('cancellation', () => {
-  test('planned invoices are reduced latest-first and the emptied ones are voided', () => {
+  function cancelMidTerm(policyId: string) {
+    const cancel = createCancellation(db, csr, {
+      policyId,
+      effectiveDate: '2027-03-01',
+      reason: 'insured request',
+    });
+    return runJob(cancel.id);
+  }
+
+  test('planned invoices are emptied latest-first and their fees reversed with them', () => {
     const { policy } = issue('monthly');
     const beforeItems = repo
       .listItemsForPolicy(db, csr, policy.id)
@@ -291,12 +319,7 @@ describe('cancellation', () => {
       repo.listInvoicesForPolicy(db, csr, policy.id).map((i) => [i.id, invoiceTotal(i.id)]),
     );
 
-    const cancel = createCancellation(db, csr, {
-      policyId: policy.id,
-      effectiveDate: '2027-03-01',
-      reason: 'insured request',
-    });
-    const { transaction } = runJob(cancel.id);
+    const { transaction } = cancelMidTerm(policy.id);
     expect(transaction.amount_cents).toBeLessThan(0);
 
     // Nothing is edited: every item written before the cancellation stands.
@@ -306,14 +329,14 @@ describe('cancellation', () => {
     }
 
     const invoices = repo.listInvoicesForPolicy(db, csr, policy.id);
-    for (const invoice of invoices.filter((i) => i.event_date < '2027-03-01')) {
-      expect(invoice.status).toBe('planned');
-      expect(invoiceTotal(invoice.id)).toBe(beforeTotals.get(invoice.id));
-    }
-
-    // The refund came off the latest installments first.
+    const survivors = invoices.filter((i) => i.event_date < '2027-03-01');
     const voided = invoices.filter((i) => i.status === 'void');
+
+    // Every invoice from the cancellation date on is emptied — return premium
+    // now takes only premium, so the six remaining installments cover the
+    // refund exactly and none is left standing.
     expect(voided.map((i) => i.event_date)).toEqual([
+      '2027-03-01',
       '2027-04-01',
       '2027-05-01',
       '2027-06-01',
@@ -322,16 +345,92 @@ describe('cancellation', () => {
     ]);
     for (const invoice of voided) expect(invoiceTotal(invoice.id)).toBe(0);
 
-    // The earliest touched invoice keeps whatever the refund did not consume.
-    const partial = invoices.find((i) => i.event_date === '2027-03-01')!;
-    expect(partial.status).toBe('planned');
-    expect(invoiceTotal(partial.id)).toBeGreaterThan(0);
-    expect(invoiceTotal(partial.id)).toBeLessThan(beforeTotals.get(partial.id)!);
+    // Each voided invoice carries a negative fee line equal to its own fee:
+    // the installment fee buys an installment, and there is no longer one.
+    for (const invoice of voided) {
+      const fees = repo.listItemsForInvoice(db, csr, invoice.id).filter((i) => i.kind === 'fee');
+      expect(fees).toHaveLength(2);
+      expect(fees[1]!.amount_cents).toBe(-fees[0]!.amount_cents);
+    }
 
-    // Every reduction is a new negative item, never an edit.
+    // The invoices before the cancellation date keep everything, fee included.
+    for (const invoice of survivors) {
+      expect(invoice.status).toBe('planned');
+      expect(invoiceTotal(invoice.id)).toBe(beforeTotals.get(invoice.id));
+    }
+    const liveFees = survivors.reduce(
+      (sum, invoice) =>
+        sum +
+        repo
+          .listItemsForInvoice(db, csr, invoice.id)
+          .filter((i) => i.kind === 'fee')
+          .reduce((s, i) => s + i.amount_cents, 0),
+      0,
+    );
+    expect(liveFees).toBeGreaterThan(0);
+    expect(after.filter((i) => i.kind === 'fee').reduce((s, i) => s + i.amount_cents, 0)).toBe(
+      liveFees,
+    );
+
+    // Nothing planned is left owing a negative amount.
+    for (const invoice of invoices.filter((i) => i.status === 'planned')) {
+      expect(invoiceTotal(invoice.id)).toBeGreaterThan(0);
+    }
+
+    // What the six installments could not absorb becomes a credit note.
+    const credit = invoices.at(-1)!;
+    expect(credit.status).toBe('billed');
+    expect(credit.due_date).toBe('2027-03-15');
+    expect(invoiceTotal(credit.id)).toBeLessThan(0);
+
+    // The premium the cancellation removed is exactly the transaction.
     const added = after.filter((i) => !beforeItems.some(([id]) => id === i.id));
-    expect(added.every((i) => i.amount_cents < 0)).toBe(true);
-    expect(added.reduce((s, i) => s + i.amount_cents, 0)).toBe(transaction.amount_cents);
+    expect(
+      added.filter((i) => i.pattern_code === 'PREMIUM').reduce((s, i) => s + i.amount_cents, 0),
+    ).toBe(transaction.amount_cents);
+    invariants(policy);
+  });
+
+  test('where the line is taxed, the tax on an emptied invoice goes with it', () => {
+    const { policy } = issue('monthly', cleanRisk(), quebecAccount().id);
+    const { transaction } = cancelMidTerm(policy.id);
+    expect(transaction.amount_cents).toBeLessThan(0);
+
+    const invoices = repo.listInvoicesForPolicy(db, csr, policy.id);
+    const voided = invoices.filter((i) => i.status === 'void');
+    expect(voided).toHaveLength(6);
+
+    const sumOf = (invoiceId: string, kind: string) =>
+      repo
+        .listItemsForInvoice(db, csr, invoiceId)
+        .filter((i) => i.kind === kind)
+        .reduce((s, i) => s + i.amount_cents, 0);
+
+    // A voided invoice collects nothing at all: no premium, no fee, no tax.
+    for (const invoice of voided) {
+      expect(sumOf(invoice.id, 'installment')).toBe(0);
+      expect(sumOf(invoice.id, 'fee')).toBe(0);
+      expect(sumOf(invoice.id, 'tax')).toBe(0);
+      expect(invoiceTotal(invoice.id)).toBe(0);
+    }
+
+    // No invoice is left planned with a negative total.
+    for (const invoice of invoices.filter((i) => i.status === 'planned')) {
+      expect(invoiceTotal(invoice.id)).toBeGreaterThan(0);
+      expect(sumOf(invoice.id, 'tax')).toBeGreaterThan(0);
+    }
+
+    // Every tax charge is still covered by its own items, reversals included.
+    const items = repo.listItemsForPolicy(db, csr, policy.id);
+    const taxCharges = repo
+      .listChargesForPolicy(db, csr, policy.id)
+      .filter((c) => c.pattern_code === 'TAX-QC');
+    expect(taxCharges.length).toBeGreaterThan(1);
+    for (const charge of taxCharges) {
+      expect(
+        items.filter((i) => i.charge_id === charge.id).reduce((s, i) => s + i.amount_cents, 0),
+      ).toBe(charge.amount_cents);
+    }
     invariants(policy);
   });
 });

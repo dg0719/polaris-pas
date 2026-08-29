@@ -2,6 +2,7 @@ import { sliceCharge, taxItemsFor, type SlicedItem } from '@polaris/domain';
 import { addDays } from '../dates.ts';
 import type { Db } from '../db.ts';
 import { ApiError } from '../errors.ts';
+import { readRisk } from '../jobs.ts';
 import { getProduct } from '../products.ts';
 import * as repo from '../repo.ts';
 import type { BillingInvoiceRow, ChargeRow, JobRow, TenantCtx } from '../repo.ts';
@@ -64,6 +65,7 @@ export function applyIssuedJob(
     plan,
     product: getProduct(policy.product_code),
     province: account.province,
+    termMonths: readRisk(job).termMonths,
   };
 
   const instruction = repo.insertInstruction(db, ctx, {
@@ -105,6 +107,7 @@ function scheduleTerm(
     amountCents: c.transaction.amount_cents,
     patternCode: premiumCharge.pattern_code,
     termStart: c.job.term_start,
+    termMonths: c.termMonths,
     plan: c.plan,
     instructionType: c.instructionType,
     feePattern: feePatternFor(db, ctx, c),
