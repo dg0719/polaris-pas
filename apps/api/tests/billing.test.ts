@@ -1,8 +1,7 @@
+import type { RiskData } from '@polaris/domain';
 import { beforeEach, describe, expect, test } from 'vitest';
-import { accountRollup } from '../src/accounts.ts';
-import { policyBilling, recordPayment } from '../src/billing.ts';
+import { createAccount } from '../src/accounts.ts';
 import type { Db } from '../src/db.ts';
-import { ApiError } from '../src/errors.ts';
 import { issueJob } from '../src/issue.ts';
 import {
   bindJob,
@@ -12,11 +11,10 @@ import {
   quoteJob,
 } from '../src/jobs.ts';
 import * as repo from '../src/repo.ts';
-import type { PolicyRow, TenantCtx } from '../src/repo.ts';
+import type { InstallmentPlan, PolicyRow, TenantCtx } from '../src/repo.ts';
 import { cleanRisk, makeAccount, makeTenant, testDb } from './helpers.ts';
 
 const TERM_START = '2026-09-01';
-const TODAY = '2027-01-15'; // four and a half months into the term
 
 let db: Db;
 let csr: TenantCtx;
@@ -29,12 +27,19 @@ beforeEach(() => {
   accountId = makeAccount(db, csr).id;
 });
 
-function issue(plan: 'full' | 'monthly' | 'quarterly', risk = cleanRisk()) {
+/**
+ * Any code in the payment-plan catalogue. Task 15 widens `InstallmentPlan` to
+ * exactly this; until then the cast is the only way to reach a plan the old
+ * three-value union never knew about.
+ */
+type PlanCode = 'full' | 'monthly' | 'quarterly' | 'monthly-2down';
+
+function issue(plan: PlanCode, risk = cleanRisk(), onAccountId = accountId) {
   const job = createSubmission(db, csr, {
-    accountId,
+    accountId: onAccountId,
     productCode: 'ON_PA',
     effectiveDate: TERM_START,
-    billingPlan: plan,
+    billingPlan: plan as InstallmentPlan,
     risk,
   });
   quoteJob(db, csr, job.id);
@@ -42,255 +47,291 @@ function issue(plan: 'full' | 'monthly' | 'quarterly', risk = cleanRisk()) {
   return issueJob(db, csr, job.id);
 }
 
-/** The one invariant billing must never break. */
-function assertScheduleMatchesLedger(policy: PolicyRow): void {
-  const transactions = repo
-    .listTransactions(db, csr, policy.id)
-    .reduce((sum, tx) => sum + tx.amount_cents, 0);
-  const invoiced = repo
-    .listInvoicesForPolicy(db, csr, policy.id)
-    .filter((i) => i.status !== 'void')
-    .reduce((sum, i) => sum + i.amount_cents, 0);
-  expect(invoiced).toBe(transactions);
+/** The same risk with collision added — a mid-term addition of premium. */
+function withCollision(risk: RiskData): RiskData {
+  risk.coverages.push({ vehicleId: 'v1', coverageCode: 'COLL', deductibleCents: 100_000 });
+  return risk;
+}
+
+function runJob(jobId: string) {
+  quoteJob(db, csr, jobId);
+  bindJob(db, csr, jobId);
+  return issueJob(db, csr, jobId);
+}
+
+/** What an invoice is worth: the sum of the items placed on it. */
+function invoiceTotal(invoiceId: string): number {
+  return repo.listItemsForInvoice(db, csr, invoiceId).reduce((sum, i) => sum + i.amount_cents, 0);
+}
+
+/**
+ * Charge coverage — every charge's items sum to the charge — plus the premium
+ * charges together equalling the written premium of record. Task 12 replaces
+ * this with `assertBillingInvariants`.
+ */
+function invariants(policy: PolicyRow): void {
+  const charges = repo.listChargesForPolicy(db, csr, policy.id);
+  const items = repo.listItemsForPolicy(db, csr, policy.id);
+  expect(charges.length).toBeGreaterThan(0);
+  for (const c of charges) {
+    expect(items.filter((i) => i.charge_id === c.id).reduce((s, i) => s + i.amount_cents, 0)).toBe(
+      c.amount_cents,
+    );
+  }
+  const premiumBilled = charges
+    .filter((c) => c.pattern_code === 'PREMIUM')
+    .reduce((s, c) => s + c.amount_cents, 0);
+  const written = repo.listTransactions(db, csr, policy.id).reduce((s, t) => s + t.amount_cents, 0);
+  expect(premiumBilled).toBe(written);
 }
 
 describe('schedule generation', () => {
-  test('a monthly plan bills twelve installments that sum to the premium', () => {
+  test('a monthly plan bills twelve invoices, each with premium and fee lines, summing to premium plus fee', () => {
     const { policy, transaction } = issue('monthly');
     const invoices = repo.listInvoicesForPolicy(db, csr, policy.id);
     expect(invoices).toHaveLength(12);
-    expect(invoices.reduce((s, i) => s + i.amount_cents, 0)).toBe(transaction.amount_cents);
     expect(invoices[0]!.due_date).toBe('2026-09-01');
+    expect(invoices[0]!.bill_date).toBe('2026-08-11'); // 21 days of lead
+    expect(invoices[0]!.status).toBe('planned');
+    expect(invoices[0]!.invoice_number).toBe(`${policy.policy_number}-01`);
     expect(invoices[11]!.due_date).toBe('2027-08-01');
-    assertScheduleMatchesLedger(policy);
+
+    const items = repo.listItemsForPolicy(db, csr, policy.id);
+    expect(
+      items.filter((i) => i.kind === 'installment').reduce((s, i) => s + i.amount_cents, 0),
+    ).toBe(transaction.amount_cents);
+    expect(items.filter((i) => i.kind === 'fee').reduce((s, i) => s + i.amount_cents, 0)).toBe(
+      Math.round((transaction.amount_cents * 130) / 10_000),
+    );
+    expect(items.some((i) => i.kind === 'tax')).toBe(false); // Ontario auto is exempt
+    expect(repo.listItemsForInvoice(db, csr, invoices[0]!.id).map((i) => i.kind)).toEqual([
+      'installment',
+      'fee',
+    ]);
+    expect(invoices.reduce((s, i) => s + invoiceTotal(i.id), 0)).toBe(
+      items.reduce((s, i) => s + i.amount_cents, 0),
+    );
+    invariants(policy);
   });
 
-  test('a quarterly plan bills four installments', () => {
-    const { policy } = issue('quarterly');
+  test('two months down bills the down payment at inception and ten installments after', () => {
+    const { policy } = issue('monthly-2down');
+    const items = repo
+      .listItemsForPolicy(db, csr, policy.id)
+      .filter((i) => i.pattern_code === 'PREMIUM');
+    expect(items[0]!.kind).toBe('downPayment');
+    expect(items[0]!.event_date).toBe(TERM_START);
+    expect(items.filter((i) => i.kind === 'installment')).toHaveLength(10);
     const invoices = repo.listInvoicesForPolicy(db, csr, policy.id);
-    expect(invoices.map((i) => i.due_date)).toEqual([
+    expect(invoices).toHaveLength(11);
+    expect(invoices.at(-1)!.due_date).toBe('2027-07-01');
+    invariants(policy);
+  });
+
+  test('a quarterly plan bills four invoices on the plan cadence', () => {
+    const { policy } = issue('quarterly');
+    expect(repo.listInvoicesForPolicy(db, csr, policy.id).map((i) => i.due_date)).toEqual([
       '2026-09-01',
       '2026-12-01',
       '2027-03-01',
       '2027-06-01',
     ]);
+    invariants(policy);
   });
 
-  test('pay in full bills once at inception', () => {
+  test('the premium charge posts receivable against unearned premium', () => {
     const { policy, transaction } = issue('full');
-    const invoices = repo.listInvoicesForPolicy(db, csr, policy.id);
-    expect(invoices).toHaveLength(1);
-    expect(invoices[0]!.amount_cents).toBe(transaction.amount_cents);
+    expect(repo.accountBalance(db, csr, '1100', { policyId: policy.id })).toBe(
+      transaction.amount_cents,
+    );
+    expect(repo.accountBalance(db, csr, '2200', { policyId: policy.id })).toBe(
+      -transaction.amount_cents,
+    );
+    // Pay in full carries no installment fee, so nothing reaches fee income.
+    expect(repo.accountBalance(db, csr, '4200', { policyId: policy.id })).toBe(0);
+    invariants(policy);
   });
 
-  test('invoice numbers are derived from the policy number', () => {
-    const { policy } = issue('quarterly');
-    const invoices = repo.listInvoicesForPolicy(db, csr, policy.id);
-    expect(invoices[0]!.invoice_number).toBe(`${policy.policy_number}-01`);
-    expect(invoices[3]!.invoice_number).toBe(`${policy.policy_number}-04`);
+  test('the installment fee posts to fee income, separately from premium', () => {
+    const { policy, transaction } = issue('monthly');
+    const fee = Math.round((transaction.amount_cents * 130) / 10_000);
+    expect(repo.accountBalance(db, csr, '4200', { policyId: policy.id })).toBe(-fee);
+    expect(repo.accountBalance(db, csr, '1100', { policyId: policy.id })).toBe(
+      transaction.amount_cents + fee,
+    );
+  });
+
+  test('where the province taxes the line, tax is its own charge and posts to tax payable', () => {
+    // Ontario exempts automobile from retail sales tax, so the only way to
+    // reach the tax path today is an account in a province that does not.
+    // The rate comes from the tax_rates catalogue keyed on the account's
+    // province and the product's line — configuration, not code. (The rate
+    // tables are Ontario's; this exercises the tax wiring, not a Quebec
+    // product, which arrives with the second product.)
+    const quebec = createAccount(db, csr, {
+      account_type: 'person',
+      name: 'Marie Tremblay',
+      email: null,
+      phone: null,
+      address_line1: '1 rue Sainte-Catherine',
+      address_line2: null,
+      city: 'Montréal',
+      province: 'QC',
+      postal_code: 'H3B 1A1',
+      producer_code: null,
+    });
+    const { policy, transaction } = issue('full', cleanRisk(), quebec.id);
+    const expected = Math.round((transaction.amount_cents * 900) / 10_000);
+
+    const items = repo.listItemsForPolicy(db, csr, policy.id);
+    const premium = items.filter((i) => i.kind === 'installment');
+    const taxItems = items.filter((i) => i.kind === 'tax');
+    expect(premium).toHaveLength(1);
+    expect(taxItems).toHaveLength(1);
+    expect(taxItems[0]!.amount_cents).toBe(expected);
+    expect(taxItems[0]!.pattern_code).toBe('TAX-QC');
+    // It rides on the same invoice as the premium it is charged on.
+    expect(taxItems[0]!.invoice_id).toBe(premium[0]!.invoice_id);
+    // ... but on a charge of its own, so charge coverage holds per charge.
+    expect(taxItems[0]!.charge_id).not.toBe(premium[0]!.charge_id);
+    expect(repo.accountBalance(db, csr, '2300', { policyId: policy.id })).toBe(-expected);
+    expect(repo.accountBalance(db, csr, '1100', { policyId: policy.id })).toBe(
+      transaction.amount_cents + expected,
+    );
+    invariants(policy);
   });
 });
 
 describe('endorsements move the schedule', () => {
-  function endorse(policyId: string, effectiveDate: string) {
-    const risk = cleanRisk();
-    risk.coverages.push({ vehicleId: 'v1', coverageCode: 'COLL', deductibleCents: 100_000 });
-    const job = createPolicyChange(db, csr, { policyId, effectiveDate, risk });
-    quoteJob(db, csr, job.id);
-    bindJob(db, csr, job.id);
-    return issueJob(db, csr, job.id);
-  }
-
-  test('additional premium spreads across untouched installments', () => {
+  test('additional premium spreads over planned invoices as new items; nothing is edited', () => {
     const { policy } = issue('monthly');
-    const before = repo.listInvoicesForPolicy(db, csr, policy.id);
-    recordPayment(db, csr, {
-      accountId,
-      amountCents: before[0]!.amount_cents,
-      method: 'eft',
-      receivedAt: '2026-09-01',
-    });
+    const before = repo
+      .listItemsForPolicy(db, csr, policy.id)
+      .map((i) => [i.id, i.amount_cents] as const);
 
-    const { transaction } = endorse(policy.id, '2027-03-01');
+    const change = createPolicyChange(db, csr, {
+      policyId: policy.id,
+      effectiveDate: '2027-01-15',
+      risk: withCollision(cleanRisk()),
+    });
+    const { transaction } = runJob(change.id);
     expect(transaction.amount_cents).toBeGreaterThan(0);
 
-    const after = repo.listInvoicesForPolicy(db, csr, policy.id);
-    expect(after).toHaveLength(12); // no extra invoice needed
-    expect(after[0]!.amount_cents).toBe(before[0]!.amount_cents); // paid one untouched
-    expect(after[5]!.amount_cents).toBeGreaterThan(before[5]!.amount_cents);
-    assertScheduleMatchesLedger(policy);
+    const after = repo.listItemsForPolicy(db, csr, policy.id);
+    for (const [id, amount] of before) {
+      expect(after.find((i) => i.id === id)!.amount_cents).toBe(amount);
+    }
+    expect(after.length).toBeGreaterThan(before.length);
+
+    // The seven invoices from the change date on carry the additional premium;
+    // the five before it are untouched and no new invoice was needed.
+    expect(repo.listInvoicesForPolicy(db, csr, policy.id)).toHaveLength(12);
+    const added = after.filter((i) => !before.some(([id]) => id === i.id));
+    expect(added).toHaveLength(7);
+    expect(added.every((i) => i.kind === 'installment' && i.amount_cents > 0)).toBe(true);
+    expect(added.every((i) => i.event_date >= '2027-01-15')).toBe(true);
+    expect(added.reduce((s, i) => s + i.amount_cents, 0)).toBe(transaction.amount_cents);
+    invariants(policy);
   });
 
-  test('an endorsement on a fully paid policy raises a new invoice', () => {
-    const { policy, transaction } = issue('full');
-    recordPayment(db, csr, {
-      accountId,
-      amountCents: transaction.amount_cents,
-      method: 'card',
-      receivedAt: '2026-09-01',
+  test('a change that alters nothing writes no items and posts nothing', () => {
+    const { policy } = issue('monthly');
+    const itemsBefore = repo.listItemsForPolicy(db, csr, policy.id).length;
+    const change = createPolicyChange(db, csr, {
+      policyId: policy.id,
+      effectiveDate: '2027-01-15',
+      risk: cleanRisk(),
     });
+    const { transaction } = runJob(change.id);
+    expect(transaction.amount_cents).toBe(0);
+    expect(repo.listItemsForPolicy(db, csr, policy.id)).toHaveLength(itemsBefore);
 
-    endorse(policy.id, '2027-03-01');
+    // A zero charge is still recorded — the instruction happened — but a
+    // zero-amount journal entry would be noise, so none is posted.
+    const zeroCharge = repo
+      .listChargesForPolicy(db, csr, policy.id)
+      .find((c) => c.amount_cents === 0)!;
+    expect(zeroCharge).toBeDefined();
+    expect(repo.listEntries(db, csr, { kind: 'charge', id: zeroCharge.id })).toEqual([]);
+    invariants(policy);
+  });
+
+  test('return premium the schedule cannot absorb becomes a credit note', () => {
+    // Pay in full leaves one invoice at inception; a mid-term reduction has
+    // nothing planned after the change date to come off, so it is credited.
+    const { policy } = issue('full', withCollision(cleanRisk()));
+    const change = createPolicyChange(db, csr, {
+      policyId: policy.id,
+      effectiveDate: '2027-03-01',
+      risk: cleanRisk(),
+    });
+    const { transaction } = runJob(change.id);
+    expect(transaction.amount_cents).toBeLessThan(0);
+
     const invoices = repo.listInvoicesForPolicy(db, csr, policy.id);
     expect(invoices).toHaveLength(2);
-    expect(invoices[1]!.amount_cents).toBeGreaterThan(0);
-    expect(invoices[1]!.due_date).toBe('2027-03-15'); // effective + 14 days
-    assertScheduleMatchesLedger(policy);
+    const credit = invoices.at(-1)!;
+    expect(credit.status).toBe('billed');
+    expect(credit.due_date).toBe('2027-03-15'); // effective date plus 14 days
+    const creditItems = repo.listItemsForInvoice(db, csr, credit.id);
+    expect(creditItems).toHaveLength(1);
+    expect(creditItems[0]!.kind).toBe('oneTime');
+    expect(creditItems[0]!.amount_cents).toBe(transaction.amount_cents);
+    invariants(policy);
   });
 });
 
 describe('cancellation', () => {
-  function cancel(policyId: string, effectiveDate: string) {
-    const job = createCancellation(db, csr, {
-      policyId,
-      effectiveDate,
-      reason: 'Vehicle sold',
-    });
-    quoteJob(db, csr, job.id);
-    bindJob(db, csr, job.id);
-    return issueJob(db, csr, job.id);
-  }
-
-  test('unpaid installments are voided rather than left standing', () => {
+  test('planned invoices are reduced latest-first and the emptied ones are voided', () => {
     const { policy } = issue('monthly');
-    recordPayment(db, csr, {
-      accountId,
-      amountCents: repo.listInvoicesForPolicy(db, csr, policy.id)[0]!.amount_cents,
-      method: 'eft',
-      receivedAt: '2026-09-01',
-    });
-
-    cancel(policy.id, '2026-11-01');
-    const invoices = repo.listInvoicesForPolicy(db, csr, policy.id);
-    expect(invoices.filter((i) => i.status === 'void').length).toBeGreaterThan(0);
-    assertScheduleMatchesLedger(policy);
-  });
-
-  test('a customer who paid in full is left holding a credit', () => {
-    const { policy, transaction } = issue('full');
-    recordPayment(db, csr, {
-      accountId,
-      amountCents: transaction.amount_cents,
-      method: 'card',
-      receivedAt: '2026-09-01',
-    });
-
-    cancel(policy.id, '2027-03-01');
-
-    const billing = policyBilling(db, csr, repo.getPolicy(db, csr, policy.id)!, TODAY);
-    const credit = billing.invoices.find((i) => i.amount_cents < 0);
-    expect(credit).toBeDefined();
-    expect(credit!.displayStatus).toBe('credit');
-    expect(billing.balanceCents).toBeLessThan(0); // the insurer owes the customer
-    assertScheduleMatchesLedger(policy);
-  });
-});
-
-describe('payments', () => {
-  test('a payment is applied to the oldest invoice first', () => {
-    const { policy } = issue('monthly');
-    const invoices = repo.listInvoicesForPolicy(db, csr, policy.id);
-    const result = recordPayment(db, csr, {
-      accountId,
-      amountCents: invoices[0]!.amount_cents,
-      method: 'eft',
-      receivedAt: '2026-09-01',
-    });
-
-    expect(result.appliedCents).toBe(invoices[0]!.amount_cents);
-    expect(result.unappliedCents).toBe(0);
-    const after = repo.listInvoicesForPolicy(db, csr, policy.id);
-    expect(after[0]!.status).toBe('paid');
-    expect(after[1]!.status).toBe('open');
-    expect(repo.listPaymentApplications(db, csr, after[0]!.id)).toHaveLength(1);
-  });
-
-  test('a partial payment leaves the invoice open', () => {
-    const { policy } = issue('monthly');
-    const first = repo.listInvoicesForPolicy(db, csr, policy.id)[0]!;
-    recordPayment(db, csr, {
-      accountId,
-      amountCents: 1000,
-      method: 'cash',
-      receivedAt: '2026-09-01',
-    });
-    const after = repo.listInvoicesForPolicy(db, csr, policy.id)[0]!;
-    expect(after.paid_cents).toBe(1000);
-    expect(after.status).toBe('open');
-    expect(after.amount_cents).toBe(first.amount_cents);
-  });
-
-  test('a payment spanning several installments settles them in order', () => {
-    const { policy } = issue('monthly');
-    const invoices = repo.listInvoicesForPolicy(db, csr, policy.id);
-    const twoAndABit = invoices[0]!.amount_cents + invoices[1]!.amount_cents + 500;
-    recordPayment(db, csr, {
-      accountId,
-      amountCents: twoAndABit,
-      method: 'eft',
-      receivedAt: '2026-09-01',
-    });
-    const after = repo.listInvoicesForPolicy(db, csr, policy.id);
-    expect(after[0]!.status).toBe('paid');
-    expect(after[1]!.status).toBe('paid');
-    expect(after[2]!.paid_cents).toBe(500);
-  });
-
-  test('overpayment is kept as account credit rather than refused', () => {
-    const { policy, transaction } = issue('full');
-    const result = recordPayment(db, csr, {
-      accountId,
-      amountCents: transaction.amount_cents + 25_000,
-      method: 'cheque',
-      receivedAt: '2026-09-01',
-    });
-    expect(result.unappliedCents).toBe(25_000);
-    const rollup = accountRollup(db, csr, accountId, TODAY);
-    expect(rollup.balanceCents).toBe(-25_000);
-    expect(policy.status).toBe('InForce');
-  });
-
-  test('a zero or negative payment is refused', () => {
-    issue('full');
-    expect(() =>
-      recordPayment(db, csr, { accountId, amountCents: 0, method: 'cash', receivedAt: TODAY }),
-    ).toThrow(ApiError);
-  });
-});
-
-describe('read models', () => {
-  test('an unpaid installment past its due date reads as overdue', () => {
-    const { policy } = issue('monthly');
-    const billing = policyBilling(db, csr, policy, TODAY);
-    const overdue = billing.invoices.filter((i) => i.displayStatus === 'overdue');
-    const planned = billing.invoices.filter((i) => i.displayStatus === 'planned');
-    expect(overdue.length).toBe(5); // Sep through Jan
-    expect(planned.length).toBe(7);
-    expect(billing.pastDueCents).toBe(
-      overdue.reduce((s, i) => s + i.amount_cents - i.paid_cents, 0),
+    const beforeItems = repo
+      .listItemsForPolicy(db, csr, policy.id)
+      .map((i) => [i.id, i.amount_cents] as const);
+    const beforeTotals = new Map(
+      repo.listInvoicesForPolicy(db, csr, policy.id).map((i) => [i.id, invoiceTotal(i.id)]),
     );
-  });
 
-  test('nextDue points at the earliest outstanding installment', () => {
-    const { policy } = issue('monthly');
-    const first = repo.listInvoicesForPolicy(db, csr, policy.id)[0]!;
-    recordPayment(db, csr, {
-      accountId,
-      amountCents: first.amount_cents,
-      method: 'eft',
-      receivedAt: '2026-09-01',
+    const cancel = createCancellation(db, csr, {
+      policyId: policy.id,
+      effectiveDate: '2027-03-01',
+      reason: 'insured request',
     });
-    const billing = policyBilling(db, csr, repo.getPolicy(db, csr, policy.id)!, TODAY);
-    expect(billing.nextDue?.dueDate).toBe('2026-10-01');
-  });
+    const { transaction } = runJob(cancel.id);
+    expect(transaction.amount_cents).toBeLessThan(0);
 
-  test('the account rollup adds up every policy on the account', () => {
-    issue('monthly');
-    issue('full');
-    const rollup = accountRollup(db, csr, accountId, TODAY);
-    expect(rollup.policyCount).toBe(2);
-    expect(rollup.inForceCount).toBe(2);
-    expect(rollup.balanceCents).toBe(rollup.billedCents - rollup.paidCents);
-    expect(rollup.annualPremiumCents).toBeGreaterThan(0);
+    // Nothing is edited: every item written before the cancellation stands.
+    const after = repo.listItemsForPolicy(db, csr, policy.id);
+    for (const [id, amount] of beforeItems) {
+      expect(after.find((i) => i.id === id)!.amount_cents).toBe(amount);
+    }
+
+    const invoices = repo.listInvoicesForPolicy(db, csr, policy.id);
+    for (const invoice of invoices.filter((i) => i.event_date < '2027-03-01')) {
+      expect(invoice.status).toBe('planned');
+      expect(invoiceTotal(invoice.id)).toBe(beforeTotals.get(invoice.id));
+    }
+
+    // The refund came off the latest installments first.
+    const voided = invoices.filter((i) => i.status === 'void');
+    expect(voided.map((i) => i.event_date)).toEqual([
+      '2027-04-01',
+      '2027-05-01',
+      '2027-06-01',
+      '2027-07-01',
+      '2027-08-01',
+    ]);
+    for (const invoice of voided) expect(invoiceTotal(invoice.id)).toBe(0);
+
+    // The earliest touched invoice keeps whatever the refund did not consume.
+    const partial = invoices.find((i) => i.event_date === '2027-03-01')!;
+    expect(partial.status).toBe('planned');
+    expect(invoiceTotal(partial.id)).toBeGreaterThan(0);
+    expect(invoiceTotal(partial.id)).toBeLessThan(beforeTotals.get(partial.id)!);
+
+    // Every reduction is a new negative item, never an edit.
+    const added = after.filter((i) => !beforeItems.some(([id]) => id === i.id));
+    expect(added.every((i) => i.amount_cents < 0)).toBe(true);
+    expect(added.reduce((s, i) => s + i.amount_cents, 0)).toBe(transaction.amount_cents);
+    invariants(policy);
   });
 });
