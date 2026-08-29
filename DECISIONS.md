@@ -167,6 +167,10 @@ anything that cannot be absorbed becomes a credit the insurer owes.
 non-payment cancellation. The reconciliation idea should survive; the spreading
 rules will need to become configurable.
 
+**Superseded by D-025.** The single reconciliation invariant became four —
+ledger balance, charge coverage, receivable truth, no negative journal line —
+once billing became a double-entry ledger.
+
 ---
 
 ## D-007 · Billing depth: schedules, invoices and payments
@@ -183,6 +187,10 @@ cancellation.
 stub. The full subsystem was a large amount of work for a demonstration. This
 level is enough to show a real billing screen without inventing a payment
 gateway.
+
+**Superseded by D-025.** That schedule-and-invoice level was the arithmetic
+core; the ledger, configurable plans and immutable items in D-025–D-027 are
+the operational layer this entry left for later.
 
 ---
 
@@ -292,6 +300,9 @@ stop being premature.
 keeping" to "a carrier's book of business" happens once and cannot be undone.
 Migrations must exist before the first real user, not after.
 
+**Superseded by D-026.** Numbered, forward-only migrations now exist; the
+countdown ran out and the transition is done.
+
 ---
 
 ## D-014 · Sign-in is a real form, but not a security boundary
@@ -353,6 +364,9 @@ A carrier's finance function reconciles written premium against receivables;
 its claims function reconciles incurred against paid and recovered. Mixing
 them makes both reconciliations wrong. Deductible recovery is a claim
 recovery record, not an invoice.
+
+**Superseded by D-025 (invariants 4a–4d), which remain a statement about
+premium only.**
 
 ---
 
@@ -450,3 +464,298 @@ test scaffolding that never touches a real database.
 **Deliberate residue:** the invented names still exist inside the test tree.
 Removing them from the tests too would be a large rewrite for no
 user-visible gain.
+
+---
+
+## D-023 · Migrations run with foreign keys switched off, then prove nothing broke
+
+**2026-08-28**
+
+`migrate()` turns `PRAGMA foreign_keys` off for the length of a run and back
+on afterwards, then fails the run if `PRAGMA foreign_key_check` reports a
+single dangling row. Migration 003 needs it: SQLite cannot alter a CHECK
+constraint in place, so widening the roles on `users` means rebuilding the
+table, and nine tables hold a foreign key to `users(id)`.
+
+**Instead of:** `PRAGMA defer_foreign_keys = ON` inside the migration, which
+is the only foreign-key pragma that does anything inside a transaction. It
+does not work here: dropping the parent table records one deferred violation
+per child row, and renaming the replacement into place never clears them, so
+the COMMIT fails. `PRAGMA writable_schema` — editing the stored CREATE
+statement directly — is refused outright by `node:sqlite`.
+
+**Why:** it is the procedure SQLite's own documentation prescribes for
+rebuilding a table, and the `foreign_key_check` afterwards is a stronger
+guarantee than per-statement enforcement would have given: it inspects every
+row in the database rather than only the ones a statement touched.
+
+**Deliberate residue:** a migration can now write a row whose foreign key
+points at nothing and only find out at the end of the run. The check turns
+that into a loud failure rather than silent corruption, but it arrives after
+the fact.
+
+
+---
+
+## D-024 · A payment plan code is any code the carrier configured, not a union
+
+**2026-08-29**
+
+`billingPlan` arriving over HTTP is checked against
+`listPaymentPlans(db, tenant, { productCode, province })` — the same filtered
+catalogue the quote wizard asked for — instead of against a three-value
+`'full' | 'monthly' | 'quarterly'` union compiled into the server. The row
+types in `apps/api/src/repo/shared.ts` carry `PlanCode`, a string, for the
+same reason. `/billing/plans` also lost its role list: it answers to any
+authenticated role.
+
+**Instead of:** widening the union each time a plan is added, which is what
+the old `requireInstallmentPlan` forced. The quote wizard reads its choices
+from the catalogue, so the server rejecting a plan the wizard had just
+offered was a live defect the moment the fourth plan appeared: a CSR
+selecting "Two months down, 10 monthly" got
+`billingPlan must be one of full, monthly, quarterly`.
+
+**Why:** invariant 9 — product configuration is data — is not true of payment
+plans if adding one needs a type widened and a deploy. The catalogue is the
+only thing that knows what a carrier sells, so it is the only thing that may
+validate it. Filtering by product *and* province keeps the boundary as strict
+as the screen: a plan filed for Ontario cannot be quoted on an Alberta
+account.
+
+**Deliberate residue, since resolved:** `InstallmentPlan` and the equal-split
+helpers in `packages/domain/src/billing.ts` were left in place, unused by the
+API, rather than deleted in a screens task. The file and its test were
+deleted once the ledger work that replaced them (D-025) was complete.
+
+---
+
+## D-025 · Billing is a double-entry ledger with immutable invoice items
+
+**2026-08-29**
+
+Every billing event — a charge sliced from premium, tax or a fee; premium
+earning; a payment received; a payment applied to an invoice — writes a
+journal entry of at least two lines, debits equal to credits, to a fixed
+chart of accounts (`packages/domain/src/billing/ledger.ts`). `postEntry`
+refuses to write an entry that does not balance. A charge is sliced once,
+at issue or endorsement time, into invoice items that are never edited
+again; an invoice is just the items that share an invoice id, and every
+balance — what an invoice is worth, what is outstanding, what an account
+owes — is a sum over items or ledger postings, never a stored total kept in
+step by hand.
+
+**Instead of:** the single reconciliation invariant in D-006 —
+`sum(non-void invoice amounts) === sum(transaction amounts)` — backed by a
+mutable `invoices` table that `reconcile()` rewrote on every job.
+
+**Why:** a mutable invoice cannot answer "what did the customer's bill say
+on the day we sent it", and a single sum-equality invariant cannot catch a
+posting that balances against the wrong account or a payment applied to an
+invoice it never touched. Four invariants replace it, each checked in
+`assertBillingInvariants` (`apps/api/src/billing/readModel.ts`) against a
+real account's data, not against a mock:
+
+1. **Ledger balance.** No journal entry's debits and credits differ.
+2. **Charge coverage.** Every charge's items sum to exactly the charge amount.
+3. **Receivable truth.** The premium-receivable ledger balance for an account
+   equals what its live (non-void) invoice items still owe.
+4. **No negative journal line.** No debit or credit is stored negative; a
+   reversal swaps which account is debited and which is credited instead.
+
+The rounding remainder on a sliced charge also moved from the first
+installment to the last (`splitRemainderLast`, replacing D-006's
+`splitEvenly`), so a customer's first payment — the one most likely to be
+quoted back to them on a call — is never the odd cent out.
+
+**Revisit when:** PR 2 adds payment instruments, requests, returns and
+holds — none of that changes the ledger shape, but reversal events
+(`postingsFor` currently has none) will need a posting rule of their own.
+
+---
+
+## D-026 · Numbered migrations replace reseeding
+
+**2026-08-29**
+
+`apps/api/src/migrations/` holds forward-only, numbered migrations, each
+recorded in `schema_migrations` and run once inside its own transaction.
+The v4 schema that used to be the whole database became migration 001
+(baseline); a database written before the migration runner existed is
+adopted by it rather than rejected. An existing database is converted in
+place, not thrown away: migration 002 turns every non-void legacy invoice
+into a charge, its items, and the postings behind them, then renames
+`invoices` to `legacy_invoices` and `payment_applications` to
+`legacy_payment_applications` — kept, not dropped, so nothing already on
+disk is destroyed by the upgrade.
+
+**Instead of:** D-013's rule — a schema-version mismatch fails outright and
+tells the operator to delete the database and reseed.
+
+**Why:** D-013 was right for a build with no data anyone cared about. This
+branch is the moment that stops being true even inside the demo: the billing
+tables change shape three times (charges and items, then billing runs, then
+the widened `users` role check), and a carrier's first real book of business
+is now close enough that "delete and start over" is no longer an acceptable
+answer to a schema change. D-023 records how the migrations that rebuild a
+table (SQLite cannot alter a CHECK constraint in place) get past foreign key
+enforcement safely.
+
+**Supersedes D-013**, which is marked superseded above rather than deleted.
+
+---
+
+## D-027 · Payment plans, charge patterns and tax rates are tenant configuration seeded from an illustrative catalogue
+
+**2026-08-29**
+
+`payment_plans`, `charge_patterns` and `tax_rates` are rows, not code,
+seeded per tenant from `DEFAULT_PAYMENT_PLANS` / `DEFAULT_CHARGE_PATTERNS` /
+`DEFAULT_TAX_RATES` (`packages/domain/src/billing/defaultPlans.ts`) when a
+tenant is bootstrapped. A plan's `installments` count describes a 12-month
+term (`monthly` means 12) and scales with the actual term length at slicing
+time (`installments × termMonths / 12`, rounded, minimum one) rather than
+being read literally. The Ontario auto installment fee is capped at 1.3% of
+premium by `feeCapBps`, enforced where the fee is sliced, not where the plan
+is defined, so a plan cannot be configured to exceed a cap that is itself
+configuration. Every filing reference on a fee or tax pattern is the literal
+placeholder `SAMPLE-FILING` or `null`, matching D-001's rule for rates.
+
+**Instead of:** a three-value `'full' | 'monthly' | 'quarterly'` union
+compiled into the server, which is what D-024 already retired for the API
+boundary; this decision is that same principle applied to where the plans,
+patterns and rates themselves live.
+
+**Why:** invariant 9 — a second product or carrier must not require touching
+engine code. A plan, a fee, or a tax rate is exactly the kind of fact that
+differs carrier to carrier and changes on a filing date; hard-coding any of
+it would mean a deploy every time a carrier's finance team files a new fee
+schedule.
+
+**Revisit when:** a carrier's real filed plans and tax rates replace the
+sample catalogue — a deliberate, legally weighted act, same as D-001.
+
+---
+
+## D-028 · Cancellation and endorsement re-spreading rules
+
+**2026-08-29**
+
+When a job reduces premium — a return-premium cancellation or a reducing
+endorsement — the reduction is applied against the invoices covering the
+period from the change date on, latest first, and only against the
+**premium** outstanding on each one. Spec §4's order is followed: the
+invoices still planned give up their premium first, then the ones already
+billed that are still unpaid, and only what neither can absorb becomes a
+credit note. Additional premium is the other way round — it lands on planned
+invoices alone, because adding to a bill already in the customer's hands
+would ask for money the document they were sent does not mention. Emptying an
+invoice's premium this way reverses its fee and tax with negative items on
+those same charges and voids the invoice; a partial reduction reverses tax
+on the amount actually reduced and leaves the fee untouched, because an
+installment fee belongs to an installment that still happens. A pro-rata
+cancellation on an advance-billed schedule was proven (Task 12 review) to
+always empty whole invoices rather than partially reduce one — the partial
+case only arises from a reducing endorsement. Tax on a reduction is priced
+at the rate in force on the date of the change, not the date the original
+premium was billed.
+
+**Instead of:** reversing premium, fee and tax proportionally on every
+touched invoice regardless of how much of it was emptied, or repricing tax
+at the original billing date.
+
+**Why:** installment fees are compensation for the installments still to be
+collected; cancelling a future installment should not refund a fee for
+service already rendered on the ones already billed. Latest-invoices-first
+mirrors how the old spreading rule (D-006) treated return premium, so a
+customer's next payment still drops before their last one does.
+
+**The `'paid'` fallback is explicit in the code, not an omission.**
+`taxBasis(rate)` in `packages/domain/src/billing/tax.ts` is the one place
+that answers what date a rate is priced on; it returns `'billed'` for both
+configured values and says why in a comment, and `taxItemsFor` calls it and
+throws rather than silently dropping tax should that ever change. A domain
+test pins that a rate configured `appliesOn: 'paid'` still produces items at
+billing time, so the day PR 2 lands the test fails and has to be rewritten
+deliberately.
+
+**Revisit when:** PR 2 adds the `appliesOn: 'paid'` tax recompute. Until
+then, a mid-term reduction on a policy whose province changed its tax rate
+mid-term carries a small mis-rated credit — cents, not dollars, and only on
+provinces with a rate change inside the term (Quebec's 2027-01-01 change is
+the current example).
+
+---
+
+## D-029 · Earned premium is posted daily by the billing day
+
+**2026-08-29**
+
+One process, `runBillingDay` (`apps/api/src/billing/billingDay.ts`), bills
+the invoices whose bill date has arrived and posts earned premium for every
+in-force policy version, from `max(term_start, effective_date)` to
+`term_end`, capped at cancellation. Earning is a delta against each
+version's last-posted snapshot, so a version is never earned twice and a
+day with nothing new to earn posts no journal line — a zero or negative
+earning line is refused rather than written. The run is idempotent per
+`(tenant, date)`: it is recorded before the work happens, and a second call
+for a date already run does nothing. `POST /billing/run` refuses a date
+earlier than the tenant's newest run or later than today; the same function
+also runs on a server timer.
+
+**Instead of:** earning every version from its own term start regardless of
+when it took effect, which double-counts the part of an endorsed term that
+an earlier version already earned.
+
+**Why:** `max(term_start, effective_date)` is what makes an endorsement's
+earning additive rather than double-counted — its transaction is already
+the remaining-term delta, so it only earns the days from when it took
+effect. Refusing a zero or negative line keeps invariant 4d (no negative
+journal line) true by construction rather than by a check bolted on after
+the fact, and the run-date guard stops an out-of-order run from corrupting
+an earned balance that later runs build on.
+
+**The run commits in batches, and resumes rather than skipping.**
+`node:sqlite` is synchronous: the run blocks the process while it executes,
+and one transaction around a carrier's whole book would hold every other
+writer out for the length of it. So the work commits per batch — a page of
+invoices to bill, a page of policies to earn — which bounds how long the
+write lock is held but makes a crash mid-run possible. The run row is the
+marker: it is inserted first and its `finished_at` written last, so a row
+without `finished_at` is a run that stopped part-way and the next call for
+that date re-runs the batches instead of skipping them. That is safe because
+every batch is idempotent — billing an already-billed invoice is a no-op,
+and earning posts the delta against the version's last snapshot. On start
+the first run is deferred five seconds after `listen`, so the port opens
+before the process takes the pause.
+
+None of this makes the run concurrent, and it is not meant to: a scheduler
+that owns the job, and PostgreSQL underneath it, are the production answer.
+The batching is what keeps a single-process SQLite deployment usable in the
+meantime.
+
+**Deliberate residue:** a legitimate backfill — posting an earlier date
+after a later one already ran — currently has no path except restoring a
+backup. Acceptable for PR 1; a real backfill path is PR 2 or later.
+
+---
+
+## D-030 · Two billing roles, no default sign-ins
+
+**2026-08-29**
+
+`billing` and `finance` join the role set, gating `/billing/run` (finance or
+admin) and the finance-facing screens, but neither gets a default sign-in
+from `bootstrap.ts`. The product still ships empty with five sign-ins,
+exactly as D-022 describes; an admin creates a `billing` or `finance`
+sign-in from the Team screen the same way they create any other.
+
+**Instead of:** adding two more default sign-ins alongside the existing
+five.
+
+**Why:** the empty-start bootstrap and its tests are pinned to five
+usernames, and admin already satisfies every finance guard the new roles
+exist to narrow, so nothing is blocked by their absence. Growing the
+default sign-in list is also the wrong direction for D-022's principle: the
+fewer accounts a fresh install invents, the clearer the line between what a
+person entered and what the product assumed.

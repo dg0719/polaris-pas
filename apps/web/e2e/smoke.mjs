@@ -214,6 +214,14 @@ try {
   await page.getByRole('link', { name: 'New submission' }).first().click();
   await page.waitForLoadState('networkidle');
   check('the wizard opens on step one', await appears(page.getByRole('button', { name: /1\s*Policy/ })));
+  // The plans come from the billing catalogue, not a hard-coded list in the
+  // client: a plan a carrier configures has to appear here without a code change.
+  const planChoices = page.locator('.choices .choice__title');
+  check('the plan step lists the configured plans', await appears(planChoices));
+  check(
+    'a configured plan the client never hard-coded is offered',
+    (await page.locator('.step-panel').innerText()).includes('Two months down'),
+  );
   await page.getByRole('button', { name: 'Continue' }).click();
   check('step two asks for drivers', await appears(page.getByRole('heading', { name: /Driver 1/ })));
 

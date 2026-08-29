@@ -255,4 +255,5 @@ export const ontarioAutoV1: ProductDefinition = {
       valueLabel: 'prior at-fault claims',
     },
   ],
+  billing: { premiumPatternCode: 'PREMIUM', line: 'auto', defaultPaymentPlan: 'monthly', allowedFeePatterns: ['FEE-INST', 'FEE-NSF', 'FEE-REINSTATE'] },
 };

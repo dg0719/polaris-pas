@@ -86,6 +86,18 @@ export function createUser(
   return row;
 }
 
+/**
+ * Every tenant in the database. The one read that is deliberately not
+ * tenant-scoped: the billing day timer has no caller to take a tenant from,
+ * so it iterates them and scopes each run to one. Nothing else may use this.
+ */
+export function listTenantIds(db: Db): string[] {
+  const rows = db.prepare('SELECT id FROM tenants ORDER BY created_at ASC').all() as unknown as {
+    id: string;
+  }[];
+  return rows.map((row) => row.id);
+}
+
 export function findUserByApiKey(db: Db, apiKey: string): UserRow | null {
   return one<UserRow>(db.prepare('SELECT * FROM users WHERE api_key = ?').get(apiKey));
 }

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { request, useMutation, useQuery } from '../lib/api.ts';
 import { addDaysIso, date, money, planName, todayIso } from '../lib/format.ts';
+import { findPlan, firstPaymentCents, usePaymentPlans } from '../lib/plans.ts';
 import { Link, useRouter } from '../lib/router.tsx';
 import type { Account, Job, ProductDefinition } from '../lib/types.ts';
 import {
@@ -25,11 +26,12 @@ import {
 import { CoveragesStep, DriversStep, PolicyStep, VehiclesStep } from './wizard/steps.tsx';
 
 const STEPS = ['Policy', 'Drivers', 'Vehicles', 'Coverages', 'Review'] as const;
+const PRODUCT_CODE = 'ON_PA';
 
 export function SubmissionWizard({ accountId }: { accountId: string }) {
   const { navigate } = useRouter();
   const account = useQuery<{ account: Account }>(`/accounts/${accountId}`);
-  const product = useQuery<{ product: ProductDefinition }>('/products/ON_PA');
+  const product = useQuery<{ product: ProductDefinition }>(`/products/${PRODUCT_CODE}`);
 
   const [step, setStep] = useState(0);
   const [reached, setReached] = useState(0);
@@ -67,7 +69,7 @@ export function SubmissionWizard({ accountId }: { accountId: string }) {
     return request<{ job: Job }>(`/accounts/${accountId}/submissions`, {
       method: 'POST',
       body: {
-        productCode: 'ON_PA',
+        productCode: PRODUCT_CODE,
         effectiveDate: form.effectiveDate,
         billingPlan: form.billingPlan,
         risk,
@@ -166,7 +168,14 @@ export function SubmissionWizard({ accountId }: { accountId: string }) {
           </div>
         ) : null}
 
-        {step === 0 ? <PolicyStep form={form} update={update} /> : null}
+        {step === 0 ? (
+          <PolicyStep
+            form={form}
+            update={update}
+            productCode={PRODUCT_CODE}
+            province={account.data?.account.address.province}
+          />
+        ) : null}
 
         {step === 1 ? (
           <>
@@ -206,7 +215,12 @@ export function SubmissionWizard({ accountId }: { accountId: string }) {
         ) : null}
 
         {step === 4 ? (
-          <Review job={quoted} form={form} onOpenJob={() => jobId && navigate(`/jobs/${jobId}`)} />
+          <Review
+            job={quoted}
+            form={form}
+            province={account.data?.account.address.province}
+            onOpenJob={() => jobId && navigate(`/jobs/${jobId}`)}
+          />
         ) : null}
       </div>
 
@@ -237,12 +251,17 @@ export function SubmissionWizard({ accountId }: { accountId: string }) {
 function Review({
   job,
   form,
+  province,
   onOpenJob,
 }: {
   job: Job | null;
   form: WizardForm;
+  province: string | undefined;
   onOpenJob: () => void;
 }) {
+  const { plans } = usePaymentPlans(PRODUCT_CODE, province);
+  const plan = findPlan(plans, form.billingPlan);
+
   if (!job?.quote) {
     return <Notice>Rating did not return a quote. Go back and check the coverages.</Notice>;
   }
@@ -257,12 +276,15 @@ function Review({
           {money(quote.annualPremiumCents)}
         </Fact>
         <Fact label="Due at inception" lead>
-          <Money cents={firstInstalment(quote.annualPremiumCents, form.billingPlan)} />
+          <Money cents={firstPaymentCents(quote.annualPremiumCents, plan)} />
+          <span className="cell-sub">
+            Before fees and tax. The schedule is written when the policy is issued.
+          </span>
         </Fact>
         <Fact label="Term">
           {date(quote.termStart)} → {date(quote.termEnd)}
         </Fact>
-        <Fact label="Billing">{planName(form.billingPlan)}</Fact>
+        <Fact label="Billing">{planName(form.billingPlan, plans)}</Fact>
       </Facts>
 
       {referred ? (
@@ -337,11 +359,4 @@ function Review({
       </div>
     </div>
   );
-}
-
-function firstInstalment(annualCents: number, plan: WizardForm['billingPlan']): number {
-  if (plan === 'full') return annualCents;
-  const count = plan === 'monthly' ? 12 : 4;
-  const base = Math.floor(annualCents / count);
-  return base + (annualCents - base * count);
 }

@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import type {
-  InstallmentPlan,
-  JobStatus,
-  JobType,
-  PolicyStatus,
-  Role,
-} from '@polaris/domain';
+import type { JobStatus, JobType, PolicyStatus, Role } from '@polaris/domain';
 
 // Re-exported so sibling repo modules import their vocabulary from one place.
-export type { InstallmentPlan, JobStatus, JobType, PolicyStatus, Role };
+export type { JobStatus, JobType, PolicyStatus, Role };
+
+/**
+ * The code of a payment plan the carrier has configured. Deliberately a string
+ * and not a union: plans are rows in `payment_plans`, so a carrier adding one
+ * must not need a type widened. The catalogue validates it at the boundary.
+ */
+export type PlanCode = string;
 
 export function newId(): string {
   return randomUUID();
@@ -75,23 +76,7 @@ export interface PolicyRow {
   policy_number: string;
   product_code: string;
   status: PolicyStatus;
-  billing_plan: InstallmentPlan;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface InvoiceRow {
-  id: string;
-  tenant_id: string;
-  account_id: string;
-  policy_id: string;
-  invoice_number: string;
-  sequence: number;
-  term_number: number;
-  due_date: string;
-  amount_cents: number;
-  paid_cents: number;
-  status: 'open' | 'paid' | 'void';
+  billing_plan: PlanCode;
   created_at: string;
   updated_at: string;
 }
@@ -105,15 +90,9 @@ export interface PaymentRow {
   reference: string | null;
   received_at: string;
   created_at: string;
-}
-
-export interface PaymentApplicationRow {
-  id: string;
-  tenant_id: string;
-  payment_id: string;
-  invoice_id: string;
-  amount_cents: number;
-  created_at: string;
+  status: 'pending' | 'cleared' | 'returned' | 'reversed';
+  created_by: string | null;
+  policy_id: string | null;
 }
 
 export interface PolicyVersionRow {
@@ -141,7 +120,7 @@ export interface JobRow {
   status: JobStatus;
   policy_id: string | null;
   product_code: string;
-  billing_plan: InstallmentPlan;
+  billing_plan: PlanCode;
   effective_date: string;
   term_start: string;
   term_end: string;
@@ -179,6 +158,129 @@ export interface TransactionRow {
   effective_date: string;
   amount_cents: number;
   created_at: string;
+}
+
+// ─── Billing rows (journal, catalogue-derived items) ───────────────────────
+// Charge patterns, payment plans and tax rates are mapped straight to the
+// domain `*Def` types inside `repo/billingConfig.ts`, so they have no row
+// type here — snake_case config never leaves that module.
+
+export interface JournalEntryRow {
+  id: string;
+  tenant_id: string;
+  posted_at: string;
+  effective_date: string;
+  event_type: string;
+  reference_kind: string;
+  reference_id: string;
+  actor_user_id: string | null;
+  reversal_of: string | null;
+  reason: string | null;
+}
+
+export interface JournalLineRow {
+  id: string;
+  tenant_id: string;
+  entry_id: string;
+  account_code: string;
+  account_id: string | null;
+  policy_id: string | null;
+  producer_id: string | null;
+  province: string | null;
+  method: string | null;
+  debit_cents: number;
+  credit_cents: number;
+}
+
+export interface BillingInstructionRow {
+  id: string;
+  tenant_id: string;
+  policy_id: string;
+  policy_version_id: string;
+  transaction_id: string | null;
+  type: string;
+  payment_plan_code: string;
+  billing_method: string;
+  effective_date: string;
+  created_at: string;
+}
+
+export interface ChargeRow {
+  id: string;
+  tenant_id: string;
+  instruction_id: string;
+  account_id: string;
+  policy_id: string;
+  pattern_code: string;
+  amount_cents: number;
+  effective_date: string;
+  province: string;
+  line: string;
+  created_at: string;
+}
+
+export interface InvoiceStreamRow {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  policy_id: string | null;
+  anchor_date: string;
+  periodicity: string;
+  lead_days: number;
+  created_at: string;
+}
+
+export interface BillingInvoiceRow {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  policy_id: string;
+  stream_id: string;
+  invoice_number: string;
+  sequence: number;
+  term_number: number;
+  event_date: string;
+  bill_date: string;
+  due_date: string;
+  status: 'planned' | 'billed' | 'paid' | 'void';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InvoiceItemRow {
+  id: string;
+  tenant_id: string;
+  charge_id: string;
+  invoice_id: string;
+  account_id: string;
+  policy_id: string;
+  kind: 'downPayment' | 'installment' | 'oneTime' | 'fee' | 'tax';
+  pattern_code: string;
+  amount_cents: number;
+  event_date: string;
+  sequence: number;
+  paid_cents: number;
+  offsets_item_id: string | null;
+  created_at: string;
+}
+
+export interface ItemApplicationRow {
+  id: string;
+  tenant_id: string;
+  payment_id: string;
+  item_id: string;
+  amount_cents: number;
+  reversed_by: string | null;
+  created_at: string;
+}
+
+export interface BillingRunRow {
+  id: string;
+  tenant_id: string;
+  run_date: string;
+  started_at: string;
+  finished_at: string | null;
+  summary_json: string;
 }
 
 export function one<T>(row: unknown): T | null {
@@ -310,4 +412,28 @@ export interface ClaimTaskRow {
   created_by: string;
   created_at: string;
   updated_at: string;
+}
+
+// ─── The billing day ───────────────────────────────────────────────────────
+
+export interface BillingRunRow {
+  id: string;
+  tenant_id: string;
+  run_date: string;
+  started_at: string;
+  finished_at: string | null;
+  summary_json: string;
+}
+
+/** What one policy version had earned as at `as_of`. Cumulative, never a
+ * delta: the billing day posts the difference between two of these. */
+export interface EarningSnapshotRow {
+  id: string;
+  tenant_id: string;
+  policy_version_id: string;
+  policy_id: string;
+  as_of: string;
+  written_cents: number;
+  earned_cents: number;
+  created_at: string;
 }

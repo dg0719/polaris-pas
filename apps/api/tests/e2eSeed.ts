@@ -1,8 +1,9 @@
 import { pathToFileURL } from 'node:url';
-import type { InstallmentPlan, RiskData, Role } from '@polaris/domain';
+import type { RiskData, Role } from '@polaris/domain';
 import { bootstrapTenant } from '../src/bootstrap.ts';
 import { createAccount } from '../src/accounts.ts';
-import { recordPayment } from '../src/billing.ts';
+import { recordPayment } from '../src/billing/payments.ts';
+import { accountInvoices } from '../src/billing/readModel.ts';
 import { addDays, addMonths, todayIso } from '../src/dates.ts';
 import { openDb, type Db } from '../src/db.ts';
 import { DEFAULT_ACCOUNTS } from '../src/demo.ts';
@@ -17,7 +18,7 @@ import {
   underwriteJob,
 } from '../src/jobs.ts';
 import * as repo from '../src/repo.ts';
-import type { AccountRow, TenantCtx } from '../src/repo.ts';
+import type { AccountRow, PlanCode, TenantCtx } from '../src/repo.ts';
 import { account, coverages, driver, risk, vehicle } from './fixtures.ts';
 import { reportClaim } from '../src/claims/fnol.ts';
 import { assignClaim, closeClaim, closeExposure } from '../src/claims/lifecycle.ts';
@@ -65,7 +66,7 @@ function submit(
   ctx: TenantCtx,
   acct: AccountRow,
   effectiveDate: string,
-  plan: InstallmentPlan,
+  plan: PlanCode,
   riskData: RiskData,
 ) {
   return createSubmission(db, ctx, {
@@ -83,7 +84,7 @@ function issuePolicy(
   ctx: TenantCtx,
   acct: AccountRow,
   effectiveDate: string,
-  plan: InstallmentPlan,
+  plan: PlanCode,
   riskData: RiskData,
 ) {
   const job = submit(db, ctx, acct, effectiveDate, plan, riskData);
@@ -94,14 +95,15 @@ function issuePolicy(
 
 /** Pay the first `count` invoices that are still outstanding. */
 function payInvoices(db: Db, ctx: TenantCtx, accountId: string, count: number): void {
-  const outstanding = repo
-    .listInvoicesForAccount(db, ctx, accountId)
-    .filter((i) => i.status === 'open' && i.amount_cents > i.paid_cents)
+  // An invoice is worth the sum of its items, so what is left to collect
+  // comes from the read model rather than from the invoice row.
+  const outstanding = accountInvoices(db, ctx, accountId, todayIso())
+    .filter((i) => i.status !== 'void' && i.outstandingCents > 0)
     .slice(0, count);
   for (const invoice of outstanding) {
     recordPayment(db, ctx, {
       accountId,
-      amountCents: invoice.amount_cents - invoice.paid_cents,
+      amountCents: invoice.outstandingCents,
       method: 'eft',
       reference: `EFT-${invoice.invoice_number}`,
       receivedAt: invoice.due_date,

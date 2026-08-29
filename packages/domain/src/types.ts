@@ -7,7 +7,9 @@ export type Role =
   | 'underwriter'
   | 'adjuster'
   | 'claims_supervisor'
-  | 'admin';
+  | 'admin'
+  | 'billing'
+  | 'finance';
 
 export type JobType = 'Submission' | 'PolicyChange' | 'Renewal' | 'Cancellation';
 
@@ -151,6 +153,8 @@ export interface ProductDefinition {
   lossCauses: LossCauseDef[];
   /** Fraud indicators evaluated at first notice of loss. */
   fraudRules: FraudRuleDef[];
+  /** How this product is billed: which pattern its premium uses, its tax line, and which fees may be charged. */
+  billing: { premiumPatternCode: string; line: string; defaultPaymentPlan: string; allowedFeePatterns: string[] };
 }
 
 // ─── Quote result ────────────────────────────────────────────────────────────

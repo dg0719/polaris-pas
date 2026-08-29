@@ -1,8 +1,11 @@
 # Polaris PAS
 
 A core insurance system for small and mid-sized Canadian property and casualty insurers:
-policy administration, billing and claims. Policy administration is substantially built,
-billing is a working slice, claims has not been started. See [ROADMAP.md](ROADMAP.md).
+policy administration, billing and claims. Policy administration is substantially built for
+one product; billing is a double-entry ledger with configurable payment plans and a billing
+day; claims — first notice of loss through adjuster workflow to closure — is built ahead of
+the roadmap's order. Multi-tenant throughout, with 314 tests and two browser tests. See
+[ROADMAP.md](ROADMAP.md).
 
 First product: **Ontario personal auto**, with a working web client.
 
@@ -56,13 +59,14 @@ and saved permanently in `polaris.db` — delete that file to start over.
 
 The referral queue belongs to the underwriter; a CSR can quote and bind but cannot accept a
 referred risk; claim payments above an adjuster's authority wait for the supervisor. The
-admin's **Team** screen creates further sign-ins and resets passwords. Setting
+admin's **Team** screen creates further sign-ins and resets passwords — including the two
+billing roles, `billing` and `finance`, which have no default sign-in of their own. Setting
 `POLARIS_DEMO=1` prints the default credentials under the sign-in form; without it the form
 advertises nothing.
 
 | Command | What it does |
 |---|---|
-| `npm test` | 246 unit and integration tests |
+| `npm test` | 314 unit and integration tests |
 | `npm run test:e2e` | two browser tests (policy path, claims path) on scratch databases |
 | `npm run typecheck` | both TypeScript projects |
 | `npm run build:web` | production build of the client |
@@ -81,6 +85,7 @@ Every setting has a working default; see [.env.example](.env.example).
 | `POLARIS_WEB_DIR` | `apps/web/dist` | Where the built client lives. |
 | `POLARIS_SERVE_WEB` | `1` | `0` runs API-only, for when something else serves the client. |
 | `POLARIS_API` | `http://localhost:3000` | Dev only: what the Vite dev server proxies `/api` to. |
+| `POLARIS_INTEGRITY_CHECK` | unset | `1` runs a full foreign-key check on every start, not only after a migration applies. It scans the whole database, so it is a diagnostic, not routine. |
 
 ### Deploying elsewhere
 
@@ -94,8 +99,8 @@ PORT=8080 npm start
 
 Behind a reverse proxy, forward everything to that port; the app needs no path
 rewriting. To persist data across deploys, point `POLARIS_DB` at a file on a
-mounted volume. There is no migration path between schema versions yet, so a
-schema change means reseeding.
+mounted volume. Schema changes are numbered, forward-only migrations
+(`apps/api/src/migrations/`) applied automatically on startup.
 
 ## First start
 
@@ -117,17 +122,21 @@ packages/domain    Pure domain logic — no I/O, no framework
   uwRules.ts         Data-driven underwriting referral rules
   stateMachine.ts    Uniform job lifecycle with role and referral guards
   proration.ts       Term, mid-term delta and cancellation refund maths
-  billing.ts         Installment schedules and premium re-spreading
+  billing/           Ledger postings, charge slicing, plan re-spreading, tax,
+                     earning maths, the illustrative plan/pattern/rate catalogue
   claims/            Coverage-in-force, claim financials, claim state machines,
                      payment authority, fraud rules
 
 apps/api           HTTP API — node:http + node:sqlite, zero runtime dependencies
-  db.ts              Schema, versioning and transactions
+  db.ts              Database connection, migration runner, transactions
+  migrations/        Numbered, forward-only schema migrations, applied on startup
   repo/              Tenant-scoped data access, split by aggregate
   accounts.ts        Customers of record and their rollups
   jobs.ts            Job creation, quoting and workflow actions
   issue.ts           Issuance: policy version + transaction + billing, atomically
-  billing.ts         Schedule generation, reconciliation, payments
+  billing/           Charges and items from an issued job, re-spreading on
+                     endorsement and cancellation, payments, the billing day,
+                     the read model behind the billing screens
   worklist.ts        The underwriter's queue
   claims/            FNOL, claim lifecycle, reserves, payments, recovery, diary,
                      the claims worklist
@@ -184,17 +193,32 @@ Money is integer cents everywhere. Dates are ISO `YYYY-MM-DD`.
 
 ## Billing
 
-New business and renewals lay down an installment schedule (pay in full, monthly, or
-quarterly). Endorsements and cancellations move the transaction total, and reconciliation
-pulls the schedule back onto it: additional premium spreads across installments nobody has
-paid yet, return premium comes off the latest ones first, and anything that cannot be
-absorbed becomes a credit the insurer owes.
+Billing is a double-entry ledger, not a spreadsheet of invoice totals. Issuing or endorsing
+a policy slices its premium, fee and tax into **charges**, and each charge is sliced once
+into **invoice items** that are never edited again — a correction is a new item, never a
+change to an old one. An **invoice** is just the items that share an invoice number; what it
+is worth, what has been paid, and what an account owes are always sums over items and ledger
+postings, never a total kept in step by hand. Every billing event — a charge, an earning, a
+payment, a payment applied to an invoice — writes a balanced journal entry to a fixed chart
+of accounts (`packages/domain/src/billing/ledger.ts`); an entry whose debits and credits do
+not match is refused before it is written.
 
-One invariant holds for every policy, and is asserted in the tests:
+**Payment plans** (pay in full, monthly, two-months-down-then-monthly, quarterly, and
+whatever else a carrier configures) are tenant data, not a fixed list: `GET /billing/plans`
+returns the plans, fee patterns and tax rates in force for a product and province, and the
+quote wizard and the server validate a choice against that same catalogue.
 
-```
-sum(non-void invoice amounts) === sum(transaction amounts)
-```
+The **billing day** — `POST /api/billing/run`, and the same function again on a server timer
+— does the two jobs that happen on a schedule rather than on a customer action: it bills
+every invoice whose bill date has arrived, and it posts the premium earned since the last run
+for every in-force policy. It is idempotent per tenant and date: running it twice for the same
+day does nothing the second time, and it refuses a date earlier than the tenant's last run or
+later than today.
+
+Four invariants hold for every account and are asserted in the tests
+(`assertBillingInvariants`): every journal entry balances; every charge's items sum to the
+charge; the ledger's premium-receivable balance matches what live invoice items still owe;
+and no journal line is ever stored negative.
 
 Payments are recorded against the **account**, not a policy, because one payment can settle
 invoices across several. They apply to the oldest due invoice first; an overpayment is kept
@@ -233,6 +257,10 @@ The client owns every other path.
 | POST | `/jobs/:id/bind`, `/issue`, `/withdraw` | |
 | GET | `/policies?accountId=`, `/policies/:id`, `/policies/:id/billing` | |
 | POST | `/policies/:id/changes`, `/renewal`, `/cancellation` | → 201 |
+| GET | `/billing/plans?productCode=&province=` | payment plans, fee patterns, tax rates; any role |
+| POST | `/billing/run?date=` | bills due invoices and posts earned premium; finance or admin |
+| GET | `/billing/runs` | billing day history; finance, billing or admin |
+| GET | `/invoices/:id` | one invoice, its items and the ledger postings behind it |
 | GET | `/claims?status=&policyId=&accountId=&adjuster=` | with financials per claim |
 | GET | `/claims/queues` | approvals, my claims, unassigned, diary, flagged |
 | GET | `/claims/:id` | the whole claim file |

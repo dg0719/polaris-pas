@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { request, useMutation, useQuery } from '../lib/api.ts';
+import { useQuery } from '../lib/api.ts';
 import {
   date,
   jobTypeLabel,
@@ -10,11 +10,11 @@ import {
   todayIso,
   transactionLabel,
 } from '../lib/format.ts';
+import { usePaymentPlans } from '../lib/plans.ts';
 import { Link, useRouter } from '../lib/router.tsx';
 import type {
   Account,
   ClaimSummary,
-  Invoice,
   Job,
   LedgerTransaction,
   Policy,
@@ -25,15 +25,15 @@ import {
   Button,
   Fact,
   Facts,
-  Field,
   Money,
   Notice,
   PageHead,
   Section,
   Status,
-  TextInput,
 } from '../components/ui.tsx';
 import { RiskDetail } from './JobDetail.tsx';
+import { BillingSchedule } from './policy/BillingSchedule.tsx';
+import { ServicingForm } from './policy/ServicingForm.tsx';
 
 interface PolicyPage {
   policy: Policy;
@@ -49,6 +49,13 @@ export function PolicyDetail({ policyId }: { policyId: string }) {
   const { navigate } = useRouter();
   const page = useQuery<PolicyPage>(`/policies/${policyId}`);
   const [servicing, setServicing] = useState<'renewal' | 'cancellation' | null>(null);
+
+  // Plan names are carrier configuration, so they are read from the billing
+  // catalogue rather than guessed from the code stored on the policy.
+  const { plans: catalogue } = usePaymentPlans(
+    page.data?.policy.productCode,
+    page.data?.account.address.province,
+  );
 
   if (page.error) {
     return (
@@ -84,7 +91,7 @@ export function PolicyDetail({ policyId }: { policyId: string }) {
                   {date(currentVersion.termEnd)}
                 </span>
               ) : null}
-              <span>{planName(policy.billingPlan)}</span>
+              <span>{planName(policy.billingPlan, catalogue)}</span>
             </>
           ) : null
         }
@@ -159,45 +166,9 @@ export function PolicyDetail({ policyId }: { policyId: string }) {
 
       <Section
         title="Billing schedule"
-        note={billing ? planLabel(billing.plan) : undefined}
+        note={billing ? planLabel(billing.plan, catalogue) : undefined}
       >
-        <div className="table-wrap">
-          <table className="data">
-            <thead>
-              <tr>
-                <th scope="col">Invoice</th>
-                <th scope="col">Due</th>
-                <th scope="col">Status</th>
-                <th scope="col" className="num">
-                  Amount
-                </th>
-                <th scope="col" className="num">
-                  Paid
-                </th>
-                <th scope="col" className="num">
-                  Outstanding
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {billing?.invoices.map((invoice) => (
-                <InvoiceRow key={invoice.id} invoice={invoice} />
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <th scope="row" colSpan={3} style={{ textTransform: 'none', fontSize: 'var(--text-sm)' }}>
-                  Billed to date
-                </th>
-                <td className="num">{billing ? <Money cents={billing.billedCents} /> : null}</td>
-                <td className="num">{billing ? <Money cents={billing.paidCents} /> : null}</td>
-                <td className="num">
-                  <strong>{billing ? <Money cents={billing.balanceCents} balance /> : null}</strong>
-                </td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+        <BillingSchedule billing={billing} />
         {account ? (
           <p className="section__note" style={{ marginTop: 'var(--s-4)' }}>
             Payments are recorded against the{' '}
@@ -239,7 +210,7 @@ export function PolicyDetail({ policyId }: { policyId: string }) {
             </tbody>
             <tfoot>
               <tr>
-                <th scope="row" colSpan={2} style={{ textTransform: 'none', fontSize: 'var(--text-sm)' }}>
+                <th scope="row" colSpan={2} className="total-label">
                   Written premium
                 </th>
                 <td className="num">
@@ -328,111 +299,6 @@ export function PolicyDetail({ policyId }: { policyId: string }) {
 
       {currentVersion ? <RiskDetail risk={currentVersion.risk} /> : null}
     </>
-  );
-}
-
-function InvoiceRow({ invoice }: { invoice: Invoice }) {
-  const flagged = invoice.status === 'overdue';
-  return (
-    <tr className={flagged ? 'is-flagged' : undefined}>
-      <td className="mono">{invoice.invoiceNumber}</td>
-      <td className="date">{date(invoice.dueDate)}</td>
-      <td>
-        <Status value={invoice.status} />
-      </td>
-      <td className="num">
-        <Money cents={invoice.amountCents} delta={invoice.amountCents < 0} />
-      </td>
-      <td className="num">{invoice.status === 'void' ? '—' : money(invoice.paidCents)}</td>
-      <td className="num">{invoice.status === 'void' ? '—' : money(invoice.outstandingCents)}</td>
-    </tr>
-  );
-}
-
-function ServicingForm({
-  kind,
-  policyId,
-  termEnd,
-  onCancel,
-  onCreated,
-}: {
-  kind: 'renewal' | 'cancellation';
-  policyId: string;
-  termEnd: string;
-  onCancel: () => void;
-  onCreated: (jobId: string) => void;
-}) {
-  const [effectiveDate, setEffectiveDate] = useState(todayIso());
-  const [reason, setReason] = useState('');
-
-  const create = useMutation<Record<string, unknown>, { job: { id: string } }>((body) =>
-    request<{ job: { id: string } }>(
-      `/policies/${policyId}/${kind === 'renewal' ? 'renewal' : 'cancellation'}`,
-      { method: 'POST', body },
-    ),
-  );
-
-  async function submit() {
-    const body =
-      kind === 'renewal' ? {} : { effectiveDate, reason: reason.trim() || 'Requested by insured' };
-    const result = await create.run(body);
-    if (result) onCreated(result.job.id);
-  }
-
-  return (
-    <form
-      className="stack"
-      style={{ maxWidth: '44rem' }}
-      onSubmit={(event) => {
-        event.preventDefault();
-        void submit();
-      }}
-    >
-      <div>
-        <h2>{kind === 'renewal' ? 'Renew this policy' : 'Cancel this policy'}</h2>
-        <p className="section__note" style={{ marginTop: 'var(--s-2)' }}>
-          {kind === 'renewal'
-            ? `Creates a renewal job for the term beginning ${date(termEnd)}. It still has to be quoted, bound and issued.`
-            : 'Creates a cancellation job. Quoting it works out the pro-rata refund; nothing changes until it is issued.'}
-        </p>
-      </div>
-
-      {create.error ? <Notice tone="error">{create.error.message}</Notice> : null}
-
-      {kind === 'cancellation' ? (
-        <div className="form-grid">
-          <Field label="Effective date" hint="The day cover stops.">
-            {(props) => (
-              <TextInput
-                {...props}
-                type="date"
-                value={effectiveDate}
-                onChange={(event) => setEffectiveDate(event.target.value)}
-              />
-            )}
-          </Field>
-          <Field label="Reason">
-            {(props) => (
-              <TextInput
-                {...props}
-                value={reason}
-                placeholder="Vehicle sold, no replacement"
-                onChange={(event) => setReason(event.target.value)}
-              />
-            )}
-          </Field>
-        </div>
-      ) : null}
-
-      <div className="btn-row">
-        <Button type="submit" variant="primary" loading={create.pending}>
-          {kind === 'renewal' ? 'Create renewal' : 'Create cancellation'}
-        </Button>
-        <Button variant="ghost" onClick={onCancel}>
-          Cancel
-        </Button>
-      </div>
-    </form>
   );
 }
 

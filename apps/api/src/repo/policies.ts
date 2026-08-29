@@ -1,7 +1,7 @@
 import type { Db } from '../db.ts';
 import { many, newId, nowIso, one } from './shared.ts';
 import type {
-  InstallmentPlan,
+  PlanCode,
   PolicyRow,
   PolicyStatus,
   PolicyVersionRow,
@@ -17,7 +17,7 @@ export function insertPolicy(
     accountId: string;
     policyNumber: string;
     productCode: string;
-    billingPlan: InstallmentPlan;
+    billingPlan: PlanCode;
   },
 ): PolicyRow {
   const ts = nowIso();
@@ -76,6 +76,31 @@ export function listPolicies(
       .prepare('SELECT * FROM policies WHERE tenant_id = ? ORDER BY created_at DESC')
       .all(ctx.tenantId),
   );
+}
+
+/**
+ * One page of policy ids, ordered by id, starting after `afterId`. The
+ * billing day walks the whole book this way: `listPolicies` would put every
+ * policy a carrier has ever written into one array.
+ */
+export function listPolicyIdsAfter(
+  db: Db,
+  ctx: TenantCtx,
+  afterId: string | null,
+  limit: number,
+): string[] {
+  const rows = (
+    afterId === null
+      ? db
+          .prepare('SELECT id FROM policies WHERE tenant_id = ? ORDER BY id ASC LIMIT ?')
+          .all(ctx.tenantId, limit)
+      : db
+          .prepare(
+            'SELECT id FROM policies WHERE tenant_id = ? AND id > ? ORDER BY id ASC LIMIT ?',
+          )
+          .all(ctx.tenantId, afterId, limit)
+  ) as unknown as { id: string }[];
+  return rows.map((row) => row.id);
 }
 
 export function setPolicyStatus(

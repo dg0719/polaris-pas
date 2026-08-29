@@ -92,6 +92,65 @@ table.data tbody tr.is-flagged:hover {
   background: oklch(0.95 0.05 113.1);
 }
 
+/* An invoice opens to show what it is made of. The control is a real button so
+   it works from the keyboard; the caret is decoration only. */
+.row-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.row-toggle:hover:not(:disabled) {
+  color: var(--signal-deep);
+}
+
+.row-toggle:disabled {
+  color: var(--ink);
+  cursor: default;
+}
+
+.row-toggle__caret {
+  width: 0.75em;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+.row-toggle:disabled .row-toggle__caret {
+  visibility: hidden;
+}
+
+table.data tbody tr.row-line > td {
+  background: var(--bg-sunken);
+  padding-top: var(--s-2);
+  padding-bottom: var(--s-2);
+  color: var(--ink-2);
+  animation: row-in var(--dur) var(--ease-out) both;
+}
+
+/* The only motion here reports the state change. Opacity alone: a transform on
+   a table cell shifts it out of the column it belongs to. */
+@keyframes row-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.row-line__label {
+  padding-left: calc(var(--s-4) + 1.25rem);
+}
+
+/* A totals row in a table foot: a label, not a column heading. */
+.total-label {
+  text-transform: none;
+  font-size: var(--text-sm);
+}
+
 .num {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;

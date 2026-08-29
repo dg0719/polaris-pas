@@ -52,13 +52,23 @@ product model wrong here means rebuilding billing and claims later.
 
 ## Stage 2 · Billing a carrier could actually operate
 
-What exists is the arithmetic core, and it is sound. What is missing is
-everything around it that makes billing an operational function.
+**Done in PR 1** (August 2026, see
+`docs/superpowers/specs/2026-08-26-billing-design.md`): the arithmetic core
+was rebuilt as a double-entry ledger. A charge is sliced once into invoice
+items that are never edited again; payment plans, charge patterns and tax
+rates are tenant configuration with down payments, installment fees and a
+regulatory fee cap, not a fixed list; premium is earned daily by a billing
+day that also bills what has come due; and numbered migrations convert an
+existing database onto the new tables rather than requiring a reseed. What
+PR 1 does not touch is everything that turns that arithmetic into an
+operational function a carrier's finance team runs day to day:
 
 - **Delinquency and non-payment cancellation.** An invoice goes unpaid, a notice
   is generated, a cancellation is scheduled, and the policy state machine acts
   on it. This is the loop that connects billing back to policy, and it is the
   most-asked-about gap.
+- **Payment instruments, requests and returns.** Stored payment methods,
+  scheduled collection, and a returned payment (NSF) reversing what it paid.
 - **Direct bill and agency bill.** Whether the carrier bills the insured or the
   broker collects and remits. Small carriers frequently need both.
 - **Commissions.** Calculated, accrued, and payable to the producer.
@@ -66,8 +76,9 @@ everything around it that makes billing an operational function.
 - **General ledger export.** Written premium, earned premium, receivables, in a
   form an accountant can reconcile.
 
-**Why second:** it depends on policy transactions being correct and complete,
-and it is what a carrier's finance function will interrogate hardest.
+That work is PRs 2 through 5. **Why second:** it depends on policy
+transactions being correct and complete, and it is what a carrier's finance
+function will interrogate hardest.
 
 ---
 
