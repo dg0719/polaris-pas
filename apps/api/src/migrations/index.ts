@@ -66,10 +66,13 @@ export function migrate(db: Db): { applied: number[] } {
     }
   }
 
-  // Checked on every open, not only when something was applied: a database
-  // that was damaged once stays damaged, and a run with nothing pending is
-  // exactly when nobody would otherwise look.
-  if (enforcing) {
+  // `PRAGMA foreign_key_check` walks every foreign key in the database, which
+  // on a carrier's book is a full scan of every table — too much to pay on
+  // every process start. It runs when this call actually applied something,
+  // which is the only moment a migration can have left damage behind, and
+  // otherwise only when `POLARIS_INTEGRITY_CHECK=1` asks for it (an operator
+  // checking a database they suspect, or a test that wants the gate).
+  if (enforcing && (applied.length > 0 || process.env.POLARIS_INTEGRITY_CHECK === '1')) {
     const dangling = danglingRows(db);
     if (dangling > 0) {
       throw new Error(`This database holds ${dangling} row(s) with a broken foreign key`);

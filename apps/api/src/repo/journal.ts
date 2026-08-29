@@ -1,4 +1,4 @@
-import { assertBalanced } from '@polaris/domain';
+import { assertBalanced, UnbalancedEntryError } from '@polaris/domain';
 import type { JournalEntryInput, LedgerAccountCode } from '@polaris/domain';
 import type { Db } from '../db.ts';
 import { many, newId, nowIso } from './shared.ts';
@@ -13,6 +13,15 @@ import type { JournalEntryRow, TenantCtx } from './shared.ts';
 
 export function postEntry(db: Db, ctx: TenantCtx, entry: JournalEntryInput): JournalEntryRow {
   assertBalanced(entry);
+  // An entry of nothing but zeros balances, but it records no money moving.
+  // Writing it would put a row in the ledger that means nothing and that
+  // every later reader has to skip, so it is refused at the door: callers
+  // already skip a zero amount rather than posting one.
+  if (entry.lines.every((line) => line.debitCents === 0 && line.creditCents === 0)) {
+    throw new UnbalancedEntryError(
+      `Entry ${entry.eventType} moves nothing: every line is zero on both sides`,
+    );
+  }
 
   const row: JournalEntryRow = {
     id: newId(),

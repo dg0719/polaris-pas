@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'vitest';
+import { runBillingDay } from '../src/billing/billingDay.ts';
 import type { Db } from '../src/db.ts';
-import { createCancellation } from '../src/jobs.ts';
+import { createCancellation, createSubmission } from '../src/jobs.ts';
 import * as repo from '../src/repo.ts';
 import type { PolicyRow, TenantCtx } from '../src/repo.ts';
 import {
@@ -255,5 +256,105 @@ describe('a cancellation mid-period', () => {
     expect(removed).toBe(transaction.amount_cents);
 
     invariants(policy);
+  });
+});
+
+describe('a cancellation reaches invoices already sent out', () => {
+  // Every date here is in the past, because `runBillingDay` refuses a date
+  // later than today. The shared fixtures start their term in the future, so
+  // this block issues its own submission.
+  const PAST_TERM_START = '2024-09-01';
+
+  function issuePast() {
+    const job = createSubmission(db, csr, {
+      accountId,
+      productCode: 'ON_PA',
+      effectiveDate: PAST_TERM_START,
+      billingPlan: 'monthly',
+      risk: cleanRisk(),
+    });
+    return runJob(job.id);
+  }
+
+  test('a billed but unpaid invoice gives up its premium too, after the planned ones', () => {
+    const { policy } = issuePast();
+    // Invoices are sent 21 days before they fall due, so a run on the 10th of
+    // September has already sent out the September and October ones.
+    expect(runBillingDay(db, csr, '2024-09-10').billedInvoices).toBe(2);
+
+    const before = repo.listInvoicesForPolicy(db, csr, policy.id);
+    const second = before[1]!;
+    expect(second.status).toBe('billed');
+    expect(second.due_date).toBe('2024-10-01');
+    expect(invoiceTotal(second.id)).toBeGreaterThan(0);
+
+    const cancel = createCancellation(db, csr, {
+      policyId: policy.id,
+      effectiveDate: second.due_date,
+      reason: 'insured request',
+    });
+    const { transaction } = runJob(cancel.id);
+    expect(transaction.amount_cents).toBeLessThan(0);
+
+    // The invoice already in the customer's hands was reduced and emptied,
+    // not left standing because it had been sent.
+    expect(invoiceTotal(second.id)).toBe(0);
+    expect(repo.getInvoice(db, csr, second.id)!.status).toBe('void');
+
+    // Nothing is left asking the customer for cover after the cancellation
+    // date: the only billed invoice from that date on is the credit note.
+    const after = repo.listInvoicesForPolicy(db, csr, policy.id);
+    for (const invoice of after.filter(
+      (i) => i.status === 'billed' && i.event_date >= second.due_date,
+    )) {
+      expect(invoiceTotal(invoice.id)).toBeLessThanOrEqual(0);
+    }
+
+    // The September invoice, for cover the customer actually had, stands.
+    expect(repo.getInvoice(db, csr, before[0]!.id)!.status).toBe('billed');
+    expect(invoiceTotal(before[0]!.id)).toBeGreaterThan(0);
+
+    // Every negative premium item the cancellation wrote sums to exactly the
+    // return premium of record.
+    const removed = repo
+      .listItemsForPolicy(db, csr, policy.id)
+      .filter((i) => i.pattern_code === 'PREMIUM' && i.amount_cents < 0)
+      .reduce((sum, i) => sum + i.amount_cents, 0);
+    expect(removed).toBe(transaction.amount_cents);
+
+    invariants(policy);
+  });
+});
+
+describe('reversal items name what they take off', () => {
+  test('every fee and tax reversal offsets an item on the same invoice, opposite in sign', () => {
+    // Quebec, so the tax path is exercised as well as the fee path.
+    const { policy } = issue('monthly', cleanRisk(), quebecAccount().id);
+    const cancel = createCancellation(db, csr, {
+      policyId: policy.id,
+      effectiveDate: '2027-03-01',
+      reason: 'insured request',
+    });
+    runJob(cancel.id);
+
+    const items = repo.listItemsForPolicy(db, csr, policy.id);
+    const byId = new Map(items.map((i) => [i.id, i]));
+    const linked = items.filter((i) => i.offsets_item_id !== null);
+    expect(linked.length).toBeGreaterThan(0);
+
+    for (const reversal of linked) {
+      expect(reversal.kind === 'fee' || reversal.kind === 'tax').toBe(true);
+      const original = byId.get(reversal.offsets_item_id!);
+      expect(original).toBeDefined();
+      expect(original!.invoice_id).toBe(reversal.invoice_id);
+      expect(original!.pattern_code).toBe(reversal.pattern_code);
+      expect(Math.sign(original!.amount_cents)).toBe(-Math.sign(reversal.amount_cents));
+    }
+
+    // A premium re-spread item offsets an invoice rather than a single line,
+    // so it never claims to cancel one.
+    expect(
+      items.filter((i) => i.pattern_code === 'PREMIUM').every((i) => i.offsets_item_id === null),
+    ).toBe(true);
   });
 });

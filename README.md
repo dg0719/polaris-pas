@@ -85,6 +85,7 @@ Every setting has a working default; see [.env.example](.env.example).
 | `POLARIS_WEB_DIR` | `apps/web/dist` | Where the built client lives. |
 | `POLARIS_SERVE_WEB` | `1` | `0` runs API-only, for when something else serves the client. |
 | `POLARIS_API` | `http://localhost:3000` | Dev only: what the Vite dev server proxies `/api` to. |
+| `POLARIS_INTEGRITY_CHECK` | unset | `1` runs a full foreign-key check on every start, not only after a migration applies. It scans the whole database, so it is a diagnostic, not routine. |
 
 ### Deploying elsewhere
 

@@ -23,6 +23,15 @@ bootstrapIfEmpty(db);
 const BILLING_DAY_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /**
+ * How long after the port opens the first run starts. `node:sqlite` is
+ * synchronous, so a billing day blocks the event loop for as long as it
+ * takes; running it before `listen` would hold the port shut through the
+ * whole of it, and every health check with it. Deferring puts the process in
+ * service first and takes the pause afterwards.
+ */
+const STARTUP_DELAY_MS = 5_000;
+
+/**
  * The timer has no caller to take a tenant from, so it runs once per tenant
  * with a system context. One tenant's failure must not stop the next one's
  * run, so each is caught and logged on its own.
@@ -44,7 +53,6 @@ function runBillingDayForEveryTenant(database: Db): void {
   }
 }
 
-runBillingDayForEveryTenant(db);
 const billingDayTimer = setInterval(() => runBillingDayForEveryTenant(db), BILLING_DAY_INTERVAL_MS);
 // Never hold the process open on the timer alone.
 billingDayTimer.unref();
@@ -65,9 +73,14 @@ server.listen(port, () => {
   );
 });
 
+// The first run waits until the port is open; see STARTUP_DELAY_MS.
+const startupBillingDay = setTimeout(() => runBillingDayForEveryTenant(db), STARTUP_DELAY_MS);
+startupBillingDay.unref();
+
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     log(`\n${signal} received, shutting down`);
+    clearTimeout(startupBillingDay);
     clearInterval(billingDayTimer);
     server.close(() => {
       db.close();

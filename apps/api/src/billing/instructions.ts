@@ -14,6 +14,7 @@ import {
   INSTRUCTION_TYPE,
   insertCharge,
   postCharge,
+  taxableOn,
   taxRateOn,
   total,
   writeItems,
@@ -115,8 +116,12 @@ function scheduleTerm(
   const premiumItems = sliced.filter((i) => i.kind !== 'fee');
   const feeItems = sliced.filter((i) => i.kind === 'fee');
   const rate = taxRateOn(db, ctx, c);
+  // Every sliced item is offered to the tax, fees included: what is taxable
+  // is the charge pattern's own flag, which is product configuration.
   const taxItems = rate
-    ? taxItemsFor(premiumItems, rate, sliced.length + 1).filter((i) => i.amountCents !== 0)
+    ? taxItemsFor(sliced, rate, sliced.length + 1, taxableOn(db, ctx)).filter(
+        (i) => i.amountCents !== 0,
+      )
     : [];
 
   // Premium keeps the charge the instruction already raised; fee and tax get

@@ -79,6 +79,10 @@ export interface Placed {
   invoiceId: string;
   charge: ChargeRow;
   item: SlicedItem;
+  /** The item this one takes off, when it takes off exactly one. A fee or
+   * tax reversal names the line it cancels; a premium re-spread item offsets
+   * an invoice rather than a single item, so it leaves this unset. */
+  offsetsItemId?: string;
 }
 
 export function total(items: SlicedItem[]): number {
@@ -132,6 +136,21 @@ export function feePatternFor(db: Db, ctx: TenantCtx, c: Context): ChargePattern
     );
   }
   return requirePattern(db, ctx, code);
+}
+
+/**
+ * Which charge patterns this tenant's catalogue says are taxable. Product
+ * configuration decides it, not the item's kind: a carrier that files a
+ * taxable fee gets it taxed without a line of code changing here.
+ */
+export function taxableOn(db: Db, ctx: TenantCtx): (patternCode: string) => boolean {
+  const taxable = new Set(
+    repo
+      .listChargePatterns(db, ctx)
+      .filter((pattern) => pattern.taxable)
+      .map((pattern) => pattern.code),
+  );
+  return (patternCode: string) => taxable.has(patternCode);
 }
 
 /** The tax in force for this policy's province and line, if any. */
@@ -213,7 +232,7 @@ export function writeItems(db: Db, ctx: TenantCtx, c: Context, placed: Placed[])
       amount_cents: p.item.amountCents,
       event_date: p.item.eventDate,
       sequence,
-      offsets_item_id: null,
+      offsets_item_id: p.offsetsItemId ?? null,
     });
   }
 }

@@ -101,9 +101,14 @@ function viewsOf(
  */
 function totalsOf(views: InvoiceView[], today: string): BillingTotals {
   const live = views.filter((view) => view.status !== 'void');
-  const upcoming = live
+  const unsettled = live
     .filter((view) => view.totalCents > 0 && view.outstandingCents > 0)
-    .sort((a, b) => a.due_date.localeCompare(b.due_date))[0];
+    .sort((a, b) => a.due_date.localeCompare(b.due_date));
+  // What the customer has to pay next is the earliest bill that has not gone
+  // past its date yet — an overdue one is arrears, reported separately. When
+  // every unsettled bill is already late there is no next payment to name, so
+  // the oldest arrears stands in: it is what they owe next.
+  const upcoming = unsettled.find((view) => view.due_date >= today) ?? unsettled[0];
 
   return {
     billedCents: live.reduce((sum, view) => sum + view.totalCents, 0),

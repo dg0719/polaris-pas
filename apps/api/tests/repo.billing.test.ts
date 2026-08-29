@@ -26,4 +26,15 @@ describe('journal', () => {
     expect(repo.accountBalance(db, csr, '2200', { policyId: 'p' })).toBe(-500);
     expect(repo.accountBalance(db, other, '1100', { accountId: 'a' })).toBe(0);
   });
+
+  test('postEntry refuses an entry whose lines are all zero', () => {
+    // It balances, but it records no money moving: a row every later reader
+    // has to skip. Callers already skip a zero amount rather than posting.
+    expect(() =>
+      repo.postEntry(db, csr, { effectiveDate: '2026-09-01', eventType: 'nothing', referenceKind: 'x', referenceId: '1', reason: null, lines: [
+        { account: '1100', dimension: { accountId: 'a' }, debitCents: 0, creditCents: 0 },
+        { account: '2200', dimension: { accountId: 'a' }, debitCents: 0, creditCents: 0 }] }),
+    ).toThrow(/moves nothing/i);
+    expect(db.prepare(`SELECT count(*) AS n FROM journal_entries WHERE event_type = 'nothing'`).get()).toEqual({ n: 0 });
+  });
 });

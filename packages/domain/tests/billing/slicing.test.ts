@@ -93,3 +93,12 @@ describe('sliceCharge', () => {
     expect(() => sliceCharge({ ...base, amountCents: -1_001, plan: { ...twoDown, feeBps: 300 }, feePattern: FEE })).toThrow(/cap/);
   });
 });
+
+test('a fee that rounds to nothing on an installment writes no zero row', () => {
+  // 1.3% of $5.00 is 7 cents over ten installments: nine of them round to
+  // zero. A zero line bills nothing, so none is written.
+  const items = sliceCharge({ amountCents: 500, patternCode: 'PREMIUM', termStart: '2026-09-01', termMonths: 12, instructionType: 'newBusiness', plan: twoDown, feePattern: FEE });
+  const fees = items.filter((i) => i.kind === 'fee');
+  expect(fees.map((i) => i.amountCents)).toEqual([7]);
+  expect(fees[0]!.eventDate).toBe('2027-07-01');
+});

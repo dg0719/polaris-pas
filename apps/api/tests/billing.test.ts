@@ -546,9 +546,37 @@ describe('the read model', () => {
     expect(after.paidCents).toBe(invoiceTotal(invoices[0]!.id));
     // Only the second invoice is past due; the first was settled.
     expect(after.pastDueCents).toBe(invoiceTotal(invoices[1]!.id));
+    // The second is already late, so it is arrears rather than the next
+    // payment to make; the third is what falls due next.
     expect(after.nextDue).toEqual({
-      dueDate: '2026-10-01',
-      amountCents: invoiceTotal(invoices[1]!.id),
+      dueDate: '2026-11-01',
+      amountCents: invoiceTotal(invoices[2]!.id),
+    });
+  });
+
+  test('next due names the earliest bill not yet past, and the oldest arrears when every bill is', () => {
+    // It used to name the earliest unsettled invoice full stop, which put a
+    // date already gone by under the heading "next payment".
+    const { policy } = issue('monthly');
+    const invoices = repo.listInvoicesForPolicy(db, csr, policy.id);
+
+    // On the first day of the term nothing is late: the first invoice is next.
+    expect(policyBilling(db, csr, policy, '2026-09-01').nextDue).toEqual({
+      dueDate: '2026-09-01',
+      amountCents: invoiceTotal(invoices[0]!.id),
+    });
+
+    // A month in, two are past due and the third is what to pay next.
+    expect(policyBilling(db, csr, policy, '2026-10-05').nextDue).toEqual({
+      dueDate: '2026-11-01',
+      amountCents: invoiceTotal(invoices[2]!.id),
+    });
+
+    // Past the end of the schedule every bill is late. There is no future
+    // one to name, so the oldest arrears stands in rather than nothing.
+    expect(policyBilling(db, csr, policy, '2028-01-01').nextDue).toEqual({
+      dueDate: '2026-09-01',
+      amountCents: invoiceTotal(invoices[0]!.id),
     });
   });
 

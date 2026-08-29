@@ -1,7 +1,7 @@
 import { earnedCents } from '@polaris/domain';
 import type { Role } from '@polaris/domain';
 import { beforeEach, describe, expect, test } from 'vitest';
-import { runBillingDay } from '../src/billing/billingDay.ts';
+import { runBillingDay, writtenByVersion } from '../src/billing/billingDay.ts';
 import { assertBillingInvariants } from '../src/billing/readModel.ts';
 import { apiKey } from '../src/bootstrap.ts';
 import type { Db } from '../src/db.ts';
@@ -117,6 +117,54 @@ describe('the billing day', () => {
       db.prepare('SELECT count(*) AS n FROM journal_entries WHERE tenant_id = ?').get(tenantId),
     ).toEqual(entriesAfterFirst);
     expect(repo.listBillingRuns(db, csr)).toHaveLength(1);
+  });
+
+  test('a run left unfinished by a crash resumes instead of being skipped', () => {
+    issue('monthly');
+    // The run row is written before any work and closed out after it, so a
+    // crash mid-run leaves it without `finished_at`. Nobody can say how far
+    // it got, so the next call has to do the work rather than skip it.
+    const crashed = repo.insertBillingRun(db, csr, '2024-09-30');
+    expect(crashed.finished_at).toBeNull();
+
+    const resumed = runBillingDay(db, csr, '2024-09-30');
+    expect(resumed.skipped).toBe(false);
+    expect(resumed.runId).toBe(crashed.id);
+    expect(resumed.billedInvoices).toBe(2);
+    expect(resumed.earnedCents).toBeGreaterThan(0);
+    expect(repo.getBillingRun(db, csr, '2024-09-30')!.finished_at).not.toBeNull();
+    expect(repo.listBillingRuns(db, csr)).toHaveLength(1);
+
+    // Forced back to unfinished, the resume does the batches again and they
+    // are all no-ops: that idempotence is what makes resuming safe.
+    db.prepare('UPDATE billing_runs SET finished_at = NULL WHERE id = ?').run(crashed.id);
+    const again = runBillingDay(db, csr, '2024-09-30');
+    expect(again.skipped).toBe(false);
+    expect(again.billedInvoices).toBe(0);
+    expect(again.earnedCents).toBe(0);
+    expect(again.earnedCents + resumed.earnedCents).toBe(
+      -repo.accountBalance(db, csr, '4100', { accountId }),
+    );
+    assertBillingInvariants(db, csr, accountId);
+  });
+
+  test('a version written by more than one transaction is earned on their total', () => {
+    // The map the earning loop reads sums a version's transactions; keeping
+    // only the last would earn the wrong figure for a version that carries
+    // two of them.
+    expect(
+      writtenByVersion([
+        { policy_version_id: 'v1', amount_cents: 10_000 },
+        { policy_version_id: 'v1', amount_cents: -2_500 },
+        { policy_version_id: 'v2', amount_cents: 400 },
+      ]),
+    ).toEqual(
+      new Map([
+        ['v1', 7_500],
+        ['v2', 400],
+      ]),
+    );
+    expect(writtenByVersion([])).toEqual(new Map());
   });
 
   test('an endorsement earns from its own effective date, not from term start', () => {

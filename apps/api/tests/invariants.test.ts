@@ -131,6 +131,30 @@ describe('billing invariants', () => {
     expect(() => assertBillingInvariants(db, csr, accountId)).toThrow(/ledger balance/i);
   });
 
+  test('a negative journal line is caught and named', () => {
+    issue('monthly');
+    const entry = db
+      .prepare('SELECT id FROM journal_entries WHERE tenant_id = ? LIMIT 1')
+      .get(csr.tenantId) as { id: string };
+    // A balanced pair carrying a negative on both sides: `postingsFor` swaps
+    // the debit and credit sides for a reversal and posts the absolute
+    // value, so this can only arrive another way. Forced past `postEntry`.
+    db.prepare(
+      `INSERT INTO journal_lines
+         (id, tenant_id, entry_id, account_code, account_id, policy_id,
+          producer_id, province, method, debit_cents, credit_cents)
+       VALUES ('negative-debit', ?, ?, '1100', NULL, NULL, NULL, NULL, NULL, -100, 0)`,
+    ).run(csr.tenantId, entry.id);
+    db.prepare(
+      `INSERT INTO journal_lines
+         (id, tenant_id, entry_id, account_code, account_id, policy_id,
+          producer_id, province, method, debit_cents, credit_cents)
+       VALUES ('negative-credit', ?, ?, '2200', NULL, NULL, NULL, NULL, NULL, 0, -100)`,
+    ).run(csr.tenantId, entry.id);
+
+    expect(() => assertBillingInvariants(db, csr, accountId)).toThrow(/negative journal line/i);
+  });
+
   test('a charge no longer covered by its items is caught and named', () => {
     issue('monthly');
     const item = repo.listItemsForAccount(db, csr, accountId)[0]!;

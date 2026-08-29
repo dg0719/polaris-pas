@@ -13,15 +13,22 @@ import type { PolicyRow, TenantCtx } from '../repo.ts';
 // later tasks.
 //
 // It is idempotent per (tenant, date): the run is recorded before any work,
-// under a unique index on (tenant_id, run_date), and a second call for the
-// same date does nothing and says so. Everything runs inside one transaction
-// — so nothing here may call a service that opens its own.
+// under a unique index on (tenant_id, run_date), and a second call for a date
+// whose run finished does nothing and says so.
+//
+// The work commits in batches rather than in one transaction, because a
+// carrier's whole book in a single write lock would hold every other writer
+// out for the length of the run. That makes a crash mid-run possible, so the
+// run row is the marker: it is written first, its `finished_at` last, and a
+// row without `finished_at` is resumed rather than skipped. Resuming is safe
+// because every batch is idempotent — billing an invoice already billed is a
+// no-op, and earning posts the delta against the version's last snapshot.
 
 export interface BillingDayResult {
   runId: string;
   billedInvoices: number;
   earnedCents: number;
-  /** True when a run for this tenant and date had already happened. */
+  /** True when a run for this tenant and date had already finished. */
   skipped: boolean;
 }
 
@@ -59,27 +66,33 @@ function assertRunnable(db: Db, ctx: TenantCtx, date: string): void {
 
 export function runBillingDay(db: Db, ctx: TenantCtx, date: string): BillingDayResult {
   assertRunnable(db, ctx, date);
-  return inTransaction(db, () => {
-    // Inside the transaction: SQLite serialises writers, so the check and the
-    // insert cannot interleave with another process's run for the same date.
-    const existing = repo.getBillingRun(db, ctx, date);
-    if (existing) {
-      return { runId: existing.id, billedInvoices: 0, earnedCents: 0, skipped: true };
-    }
 
-    const run = repo.insertBillingRun(db, ctx, date);
-    const billedInvoices = billPlannedInvoices(db, ctx, date);
-    const earned = recogniseEarning(db, ctx, date);
-    repo.finishBillingRun(db, ctx, run.id, { billedInvoices, earnedCents: earned });
+  const existing = repo.getBillingRun(db, ctx, date);
+  // Only a run that finished is a repeat. One without `finished_at` stopped
+  // part-way, and nobody can say how far it got, so it is run again.
+  if (existing && existing.finished_at !== null) {
+    return { runId: existing.id, billedInvoices: 0, earnedCents: 0, skipped: true };
+  }
 
-    return { runId: run.id, billedInvoices, earnedCents: earned, skipped: false };
-  });
+  // The unique index on (tenant_id, run_date) is what stops two processes
+  // both claiming the date: the loser's insert fails rather than duplicating.
+  const run = existing ?? inTransaction(db, () => repo.insertBillingRun(db, ctx, date));
+  const billedInvoices = billPlannedInvoices(db, ctx, date);
+  const earned = recogniseEarning(db, ctx, date);
+  inTransaction(db, () =>
+    repo.finishBillingRun(db, ctx, run.id, { billedInvoices, earnedCents: earned }),
+  );
+
+  return { runId: run.id, billedInvoices, earnedCents: earned, skipped: false };
 }
 
 /**
  * A planned invoice becomes billed on its bill date — the day the customer is
  * sent it, ahead of the due date. No money moves: the charges behind the
  * invoice were posted when the job was issued.
+ *
+ * One transaction per batch, so the write lock is held for a page of invoices
+ * rather than for the whole book.
  */
 function billPlannedInvoices(db: Db, ctx: TenantCtx, date: string): number {
   // The query re-reads what the loop has just changed, so `seen` is the
@@ -91,11 +104,13 @@ function billPlannedInvoices(db: Db, ctx: TenantCtx, date: string): number {
     const batch = repo.listInvoicesToBill(db, ctx, date, BILL_BATCH);
     const fresh = batch.filter((invoice) => !seen.has(invoice.id));
     if (fresh.length === 0) return billed;
-    for (const invoice of fresh) {
-      seen.add(invoice.id);
-      repo.updateInvoiceStatus(db, ctx, invoice.id, 'billed');
-      billed += 1;
-    }
+    inTransaction(db, () => {
+      for (const invoice of fresh) {
+        seen.add(invoice.id);
+        repo.updateInvoiceStatus(db, ctx, invoice.id, 'billed');
+        billed += 1;
+      }
+    });
     if (batch.length < BILL_BATCH) return billed;
   }
 }
@@ -112,16 +127,36 @@ function recogniseEarning(db: Db, ctx: TenantCtx, date: string): number {
   let after: string | null = null;
   for (;;) {
     // Paged by id rather than read whole: a carrier's book does not fit in
-    // one array, and the run must not assume it does.
+    // one array, and the run must not assume it does. Each page commits on
+    // its own, so the lock is held for a page rather than for the book.
     const ids = repo.listPolicyIdsAfter(db, ctx, after, EARNING_BATCH);
     if (ids.length === 0) return total;
-    for (const id of ids) {
-      const policy = repo.getPolicy(db, ctx, id);
-      if (policy) total += earnPolicy(db, ctx, policy, date);
-    }
+    total += inTransaction(db, () => {
+      let page = 0;
+      for (const id of ids) {
+        const policy = repo.getPolicy(db, ctx, id);
+        if (policy) page += earnPolicy(db, ctx, policy, date);
+      }
+      return page;
+    });
     after = ids[ids.length - 1]!;
     if (ids.length < EARNING_BATCH) return total;
   }
+}
+
+/**
+ * The written premium each policy version carries. Summed rather than
+ * replaced: a version with more than one transaction against it is written
+ * for their total, and keeping only the last would earn the wrong figure.
+ */
+export function writtenByVersion(
+  transactions: { policy_version_id: string; amount_cents: number }[],
+): Map<string, number> {
+  const written = new Map<string, number>();
+  for (const tx of transactions) {
+    written.set(tx.policy_version_id, (written.get(tx.policy_version_id) ?? 0) + tx.amount_cents);
+  }
+  return written;
 }
 
 function earnPolicy(db: Db, ctx: TenantCtx, policy: PolicyRow, date: string): number {
@@ -138,14 +173,12 @@ function earnPolicy(db: Db, ctx: TenantCtx, policy: PolicyRow, date: string): nu
   const cancelledOn = versions.find((v) => v.transaction_type === 'Cancellation')?.effective_date;
   const earnedTo = cancelledOn !== undefined && cancelledOn < asOf ? cancelledOn : asOf;
 
-  const writtenByVersion = new Map(
-    repo.listTransactions(db, ctx, policy.id).map((tx) => [tx.policy_version_id, tx.amount_cents]),
-  );
+  const written = writtenByVersion(repo.listTransactions(db, ctx, policy.id));
 
   let total = 0;
   for (const version of versions) {
     if (version.transaction_type === 'Cancellation') continue;
-    const writtenCents = writtenByVersion.get(version.id) ?? 0;
+    const writtenCents = written.get(version.id) ?? 0;
     if (writtenCents === 0) continue;
 
     // A version earns from the day it takes effect, not from the start of

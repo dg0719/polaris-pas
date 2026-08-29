@@ -160,7 +160,7 @@ describe('the foreign key gate', () => {
     db.close();
   }
 
-  test('a broken foreign key fails every open, not only the first', () => {
+  test('a broken foreign key fails every open when the integrity check is asked for', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'polaris-fk-')), 'fk.db');
     const first = openDb(file);
     bootstrapTenant(first, 'Old Carrier', 'OLD');
@@ -170,8 +170,19 @@ describe('the foreign key gate', () => {
 
     // Nothing is pending any more, so the gate has to run on a no-op
     // migration pass as well — otherwise the damage is only ever seen once.
-    expect(() => openDb(file)).toThrow(/foreign key/i);
-    expect(() => openDb(file)).toThrow(/foreign key/i);
+    // The full-database scan is not free, so it is off unless asked for.
+    process.env['POLARIS_INTEGRITY_CHECK'] = '1';
+    try {
+      expect(() => openDb(file)).toThrow(/foreign key/i);
+      expect(() => openDb(file)).toThrow(/foreign key/i);
+    } finally {
+      delete process.env['POLARIS_INTEGRITY_CHECK'];
+    }
+
+    // Without it, opening a damaged database succeeds: the check is an
+    // operator's tool, not something every start pays for.
+    const reopened = openDb(file);
+    reopened.close();
   });
 });
 

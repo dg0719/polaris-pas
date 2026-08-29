@@ -642,8 +642,14 @@ sample catalogue — a deliberate, legally weighted act, same as D-001.
 **2026-08-29**
 
 When a job reduces premium — a return-premium cancellation or a reducing
-endorsement — the reduction is applied against an account's invoices latest
-first, and only against the **premium** outstanding on each one. Emptying an
+endorsement — the reduction is applied against the invoices covering the
+period from the change date on, latest first, and only against the
+**premium** outstanding on each one. Spec §4's order is followed: the
+invoices still planned give up their premium first, then the ones already
+billed that are still unpaid, and only what neither can absorb becomes a
+credit note. Additional premium is the other way round — it lands on planned
+invoices alone, because adding to a bill already in the customer's hands
+would ask for money the document they were sent does not mention. Emptying an
 invoice's premium this way reverses its fee and tax with negative items on
 those same charges and voids the invoice; a partial reduction reverses tax
 on the amount actually reduced and leaves the fee untouched, because an
@@ -663,6 +669,15 @@ collected; cancelling a future installment should not refund a fee for
 service already rendered on the ones already billed. Latest-invoices-first
 mirrors how the old spreading rule (D-006) treated return premium, so a
 customer's next payment still drops before their last one does.
+
+**The `'paid'` fallback is explicit in the code, not an omission.**
+`taxBasis(rate)` in `packages/domain/src/billing/tax.ts` is the one place
+that answers what date a rate is priced on; it returns `'billed'` for both
+configured values and says why in a comment, and `taxItemsFor` calls it and
+throws rather than silently dropping tax should that ever change. A domain
+test pins that a rate configured `appliesOn: 'paid'` still produces items at
+billing time, so the day PR 2 lands the test fails and has to be rewritten
+deliberately.
 
 **Revisit when:** PR 2 adds the `appliesOn: 'paid'` tax recompute. Until
 then, a mid-term reduction on a policy whose province changed its tax rate
@@ -699,6 +714,25 @@ effect. Refusing a zero or negative line keeps invariant 4d (no negative
 journal line) true by construction rather than by a check bolted on after
 the fact, and the run-date guard stops an out-of-order run from corrupting
 an earned balance that later runs build on.
+
+**The run commits in batches, and resumes rather than skipping.**
+`node:sqlite` is synchronous: the run blocks the process while it executes,
+and one transaction around a carrier's whole book would hold every other
+writer out for the length of it. So the work commits per batch — a page of
+invoices to bill, a page of policies to earn — which bounds how long the
+write lock is held but makes a crash mid-run possible. The run row is the
+marker: it is inserted first and its `finished_at` written last, so a row
+without `finished_at` is a run that stopped part-way and the next call for
+that date re-runs the batches instead of skipping them. That is safe because
+every batch is idempotent — billing an already-billed invoice is a no-op,
+and earning posts the delta against the version's last snapshot. On start
+the first run is deferred five seconds after `listen`, so the port opens
+before the process takes the pause.
+
+None of this makes the run concurrent, and it is not meant to: a scheduler
+that owns the job, and PostgreSQL underneath it, are the production answer.
+The batching is what keeps a single-process SQLite deployment usable in the
+meantime.
 
 **Deliberate residue:** a legitimate backfill — posting an earlier date
 after a later one already ran — currently has no path except restoring a

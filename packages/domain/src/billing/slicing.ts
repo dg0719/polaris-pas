@@ -82,7 +82,11 @@ export function sliceCharge(input: SliceInput): SlicedItem[] {
 
   if (input.feePattern && plan.feeBps > 0 && input.amountCents > 0) {
     const fee = bpsOf(input.amountCents, plan.feeBps);
+    // A fee smaller than the installment count rounds to nothing on the
+    // early ones. A zero row bills nothing and shows nothing, so it is not
+    // written — the tax path has always filtered zeros the same way.
     splitRemainderLast(fee, parts.length).forEach((amountCents, i) => {
+      if (amountCents === 0) return;
       items.push({ kind: 'fee', patternCode: input.feePattern!.code, amountCents, eventDate: dates[i]!, sequence: sequence++ });
     });
   }

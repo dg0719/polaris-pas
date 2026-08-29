@@ -11,8 +11,10 @@ export type Db = DatabaseSync;
  * - An account is the customer of record; policies hang off it.
  * - A policy is a container; each transaction (new business, endorsement,
  *   renewal, cancellation) appends an immutable `policy_versions` snapshot.
- * - Invoices are the installment schedule. They are reconciled against the
- *   policy's transactions rather than edited in place by each job type.
+ * - Money is double-entry. Every event posts a balanced journal entry; an
+ *   invoice carries no amount of its own but holds immutable items, and what
+ *   a screen shows is derived from them. Nothing edits an item: a change
+ *   writes signed items beside the old ones and voids an invoice it empties.
  *
  * The schema itself lives in numbered migrations (see migrations/), applied
  * by `migrate()` in `openDb` below.
