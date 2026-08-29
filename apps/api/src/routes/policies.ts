@@ -1,5 +1,5 @@
 import { requireAccount } from '../accounts.ts';
-import { policyBilling } from '../billing.ts';
+import { policyBilling } from '../billing/readModel.ts';
 import { todayIso } from '../dates.ts';
 import type { Db } from '../db.ts';
 import {

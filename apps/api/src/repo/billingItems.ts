@@ -94,6 +94,16 @@ export function listChargesForPolicy(db: Db, ctx: TenantCtx, policyId: string): 
   );
 }
 
+export function listChargesForAccount(db: Db, ctx: TenantCtx, accountId: string): ChargeRow[] {
+  return many<ChargeRow>(
+    db
+      .prepare(
+        'SELECT * FROM charges WHERE tenant_id = ? AND account_id = ? ORDER BY effective_date ASC',
+      )
+      .all(ctx.tenantId, accountId),
+  );
+}
+
 // ─── Invoice streams ─────────────────────────────────────────────────────
 
 export function insertStream(

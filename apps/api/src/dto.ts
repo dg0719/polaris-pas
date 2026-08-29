@@ -1,8 +1,7 @@
-import type { PolicyBilling } from './billing.ts';
+import type { InvoiceView, PolicyBilling } from './billing/readModel.ts';
 import { readQuote, readRisk } from './jobs.ts';
 import type {
   AccountRow,
-  InvoiceRow,
   JobEventRow,
   JobRow,
   PaymentRow,
@@ -112,18 +111,33 @@ export function transactionDto(tx: TransactionRow) {
   };
 }
 
-export function invoiceDto(invoice: InvoiceRow & { displayStatus?: string }) {
+/**
+ * An invoice is worth the sum of its lines, so the total is derived, never
+ * stored. `amountCents` is the name the web client still reads for it; Task
+ * 14 moves the client onto `totalCents` and the alias goes with it.
+ */
+export function invoiceDto(invoice: InvoiceView) {
   return {
     id: invoice.id,
     policyId: invoice.policy_id,
     invoiceNumber: invoice.invoice_number,
     sequence: invoice.sequence,
     termNumber: invoice.term_number,
+    eventDate: invoice.event_date,
+    billDate: invoice.bill_date,
     dueDate: invoice.due_date,
-    amountCents: invoice.amount_cents,
-    paidCents: invoice.paid_cents,
-    outstandingCents: Math.max(0, invoice.amount_cents - invoice.paid_cents),
-    status: invoice.displayStatus ?? invoice.status,
+    status: invoice.displayStatus,
+    totalCents: invoice.totalCents,
+    amountCents: invoice.totalCents,
+    paidCents: invoice.paidCents,
+    outstandingCents: invoice.outstandingCents,
+    lines: invoice.lines.map((line) => ({
+      id: line.id,
+      kind: line.kind,
+      patternCode: line.pattern_code,
+      amountCents: line.amount_cents,
+      paidCents: line.paid_cents,
+    })),
   };
 }
 
@@ -134,6 +148,8 @@ export function paymentDto(payment: PaymentRow) {
     method: payment.method,
     reference: payment.reference,
     receivedAt: payment.received_at,
+    status: payment.status,
+    policyId: payment.policy_id,
   };
 }
 

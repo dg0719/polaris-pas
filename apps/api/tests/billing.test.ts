@@ -1,7 +1,8 @@
 import type { RiskData } from '@polaris/domain';
 import { beforeEach, describe, expect, test } from 'vitest';
-import { createAccount } from '../src/accounts.ts';
+import { accountRollup, createAccount } from '../src/accounts.ts';
 import { recordPayment, unappliedCents } from '../src/billing/payments.ts';
+import { assertBillingInvariants, policyBilling } from '../src/billing/readModel.ts';
 import type { Db } from '../src/db.ts';
 import { ApiError } from '../src/errors.ts';
 import { issueJob } from '../src/issue.ts';
@@ -90,20 +91,14 @@ function invoiceTotal(invoiceId: string): number {
 }
 
 /**
- * Charge coverage — every charge's items sum to the charge — plus the premium
- * charges together equalling the written premium of record. Task 12 replaces
- * this with `assertBillingInvariants`.
+ * The three invariants of spec §2 (ledger balance, charge coverage,
+ * receivable truth), plus the one thing they cannot know: that the premium
+ * charges together equal the written premium of record in `transactions`.
  */
 function invariants(policy: PolicyRow): void {
-  const charges = repo.listChargesForPolicy(db, csr, policy.id);
-  const items = repo.listItemsForPolicy(db, csr, policy.id);
-  expect(charges.length).toBeGreaterThan(0);
-  for (const c of charges) {
-    expect(items.filter((i) => i.charge_id === c.id).reduce((s, i) => s + i.amount_cents, 0)).toBe(
-      c.amount_cents,
-    );
-  }
-  const premiumBilled = charges
+  assertBillingInvariants(db, csr, policy.account_id);
+  const premiumBilled = repo
+    .listChargesForPolicy(db, csr, policy.id)
     .filter((c) => c.pattern_code === 'PREMIUM')
     .reduce((s, c) => s + c.amount_cents, 0);
   const written = repo.listTransactions(db, csr, policy.id).reduce((s, t) => s + t.amount_cents, 0);
@@ -579,5 +574,208 @@ describe('payments', () => {
       invoiceTotal(credit.id),
     );
     expect(repo.accountBalance(db, csr, '1100', { policyId: policy.id })).toBeLessThan(0);
+  });
+});
+
+describe('the read model', () => {
+  /** The display status of every invoice on a policy, in schedule order. */
+  function statusesAt(policy: PolicyRow, today: string): string[] {
+    return policyBilling(db, csr, policy, today).invoices.map((i) => i.displayStatus);
+  }
+
+  test('an invoice reads planned, then due on its date, then overdue after it', () => {
+    const { policy } = issue('monthly');
+    // Nothing has been billed yet: the first invoice is not even printed
+    // until 2026-08-11, three weeks before it falls due.
+    expect(statusesAt(policy, '2026-08-01')[0]).toBe('planned');
+    expect(statusesAt(policy, '2026-09-01')[0]).toBe('due');
+    expect(statusesAt(policy, '2026-10-05').slice(0, 3)).toEqual(['overdue', 'overdue', 'planned']);
+  });
+
+  test('an invoice settled in full reads paid, whatever the date', () => {
+    const { policy } = issue('monthly');
+    const first = repo.listInvoicesForPolicy(db, csr, policy.id)[0]!;
+    recordPayment(db, csr, {
+      accountId,
+      amountCents: invoiceTotal(first.id),
+      method: 'eft',
+      receivedAt: '2026-09-01',
+    });
+    expect(statusesAt(policy, '2026-10-05')[0]).toBe('paid');
+  });
+
+  test('a cancellation leaves voided invoices and a credit note, each named as such', () => {
+    const { policy } = issue('monthly');
+    const cancel = createCancellation(db, csr, {
+      policyId: policy.id,
+      effectiveDate: '2027-03-01',
+      reason: 'insured request',
+    });
+    runJob(cancel.id);
+
+    const billing = policyBilling(db, csr, policy, '2027-03-02');
+    expect(billing.invoices.filter((i) => i.displayStatus === 'void')).toHaveLength(6);
+    expect(billing.invoices.at(-1)!.displayStatus).toBe('credit');
+    expect(billing.invoices.at(-1)!.totalCents).toBeLessThan(0);
+    // A voided invoice is not money the customer owes.
+    expect(billing.billedCents).toBe(
+      billing.invoices.filter((i) => i.status !== 'void').reduce((s, i) => s + i.totalCents, 0),
+    );
+  });
+
+  test('every invoice carries its own lines, and they sum to its total', () => {
+    const { policy } = issue('monthly');
+    for (const invoice of policyBilling(db, csr, policy, '2026-09-01').invoices) {
+      expect(invoice.lines.map((l) => l.kind)).toEqual(['installment', 'fee']);
+      expect(invoice.lines.reduce((s, l) => s + l.amount_cents, 0)).toBe(invoice.totalCents);
+    }
+  });
+
+  test('the policy balance is the receivable the ledger holds for that policy', () => {
+    const { policy } = issue('monthly');
+    const ledger = () => repo.accountBalance(db, csr, '1100', { policyId: policy.id });
+    expect(policyBilling(db, csr, policy, '2026-09-01').balanceCents).toBe(ledger());
+
+    const invoices = repo.listInvoicesForPolicy(db, csr, policy.id);
+    recordPayment(db, csr, {
+      accountId,
+      amountCents: invoiceTotal(invoices[0]!.id),
+      method: 'eft',
+      receivedAt: '2026-09-01',
+    });
+    const after = policyBilling(db, csr, policy, '2026-10-05');
+    expect(after.balanceCents).toBe(ledger());
+    expect(after.paidCents).toBe(invoiceTotal(invoices[0]!.id));
+    // Only the second invoice is past due; the first was settled.
+    expect(after.pastDueCents).toBe(invoiceTotal(invoices[1]!.id));
+    expect(after.nextDue).toEqual({
+      dueDate: '2026-10-01',
+      amountCents: invoiceTotal(invoices[1]!.id),
+    });
+  });
+
+  test('the account rollup agrees with the ledger and reports unapplied cash', () => {
+    const { policy } = issue('full');
+    const total = repo
+      .listItemsForPolicy(db, csr, policy.id)
+      .reduce((s, i) => s + i.amount_cents, 0);
+    recordPayment(db, csr, {
+      accountId,
+      amountCents: total + 2_500,
+      method: 'cheque',
+      receivedAt: '2026-09-01',
+    });
+
+    const rollup = accountRollup(db, csr, accountId, '2026-09-02');
+    expect(rollup.balanceCents).toBe(repo.accountBalance(db, csr, '1100', { accountId }));
+    expect(rollup.balanceCents).toBe(0);
+    expect(rollup.paidCents).toBe(total);
+    expect(rollup.unappliedCents).toBe(2_500);
+    expect(rollup.pastDueCents).toBe(0);
+  });
+
+  test('a cancellation late in the term leaves the earlier invoices, fees included, intact', () => {
+    const { policy } = issue('monthly');
+    const before = new Map(
+      repo.listInvoicesForPolicy(db, csr, policy.id).map((i) => [i.id, invoiceTotal(i.id)]),
+    );
+    const cancel = createCancellation(db, csr, {
+      policyId: policy.id,
+      effectiveDate: '2027-07-01',
+      reason: 'insured request',
+    });
+    runJob(cancel.id);
+
+    const invoices = policyBilling(db, csr, policy, '2027-07-02').invoices;
+    // Only the installments still to fall due are emptied.
+    expect(invoices.filter((i) => i.displayStatus === 'void').map((i) => i.due_date)).toEqual([
+      '2027-07-01',
+      '2027-08-01',
+    ]);
+    // Every invoice that survives keeps exactly what it held, fee included:
+    // its installment was bought, so the fee that bought it stands.
+    for (const invoice of invoices.filter((i) => i.status === 'planned')) {
+      expect(invoice.totalCents).toBe(before.get(invoice.id));
+      expect(
+        invoice.lines.filter((l) => l.kind === 'fee').reduce((s, l) => s + l.amount_cents, 0),
+      ).toBeGreaterThan(0);
+    }
+    invariants(policy);
+  });
+
+  test('a payment with nothing outstanding is held as unapplied cash in full', () => {
+    const { policy } = issue('full');
+    const total = repo
+      .listItemsForPolicy(db, csr, policy.id)
+      .reduce((s, i) => s + i.amount_cents, 0);
+    recordPayment(db, csr, { accountId, amountCents: total, method: 'eft', receivedAt: '2026-09-01' });
+
+    const second = recordPayment(db, csr, {
+      accountId,
+      amountCents: 4_000,
+      method: 'eft',
+      receivedAt: '2026-09-02',
+    });
+    expect(second.appliedCents).toBe(0);
+    expect(second.unappliedCents).toBe(4_000);
+    expect(repo.listItemApplicationsForPayment(db, csr, second.payment.id)).toEqual([]);
+    assertBillingInvariants(db, csr, accountId);
+  });
+
+  test('a payment targeted at a policy with nothing due leaves the other policy alone', () => {
+    const { policy: settled } = issue('full');
+    const { policy: other } = issue('monthly');
+    const settledTotal = repo
+      .listItemsForPolicy(db, csr, settled.id)
+      .reduce((s, i) => s + i.amount_cents, 0);
+    recordPayment(db, csr, {
+      accountId,
+      amountCents: settledTotal,
+      method: 'eft',
+      receivedAt: '2026-09-01',
+      policyId: settled.id,
+    });
+
+    const result = recordPayment(db, csr, {
+      accountId,
+      amountCents: 10_000,
+      method: 'eft',
+      receivedAt: '2026-09-02',
+      policyId: settled.id,
+    });
+    expect(result.appliedCents).toBe(0);
+    expect(result.unappliedCents).toBe(10_000);
+    expect(repo.listItemsForPolicy(db, csr, other.id).every((i) => i.paid_cents === 0)).toBe(true);
+    assertBillingInvariants(db, csr, accountId);
+  });
+
+  test('a later payment does not settle a credit note', () => {
+    const { policy } = issue('full');
+    const total = repo
+      .listItemsForPolicy(db, csr, policy.id)
+      .reduce((s, i) => s + i.amount_cents, 0);
+    recordPayment(db, csr, { accountId, amountCents: total, method: 'eft', receivedAt: '2026-09-01' });
+    const cancel = createCancellation(db, csr, {
+      policyId: policy.id,
+      effectiveDate: '2027-03-01',
+      reason: 'insured request',
+    });
+    runJob(cancel.id);
+
+    const credit = repo.listInvoicesForPolicy(db, csr, policy.id).at(-1)!;
+    expect(repo.listItemsForInvoice(db, csr, credit.id)[0]!.amount_cents).toBeLessThan(0);
+
+    const result = recordPayment(db, csr, {
+      accountId,
+      amountCents: 3_000,
+      method: 'eft',
+      receivedAt: '2027-03-02',
+    });
+
+    // Cash never settles money the carrier owes the customer.
+    expect(result.appliedCents).toBe(0);
+    expect(result.unappliedCents).toBe(3_000);
+    expect(repo.listItemsForInvoice(db, csr, credit.id)[0]!.paid_cents).toBe(0);
+    assertBillingInvariants(db, csr, accountId);
   });
 });

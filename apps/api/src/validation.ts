@@ -231,6 +231,7 @@ export function parsePaymentInput(value: unknown): {
   method: 'card' | 'eft' | 'cheque' | 'cash';
   reference?: string;
   receivedAt: string;
+  policyId?: string;
 } {
   const obj = asObject(value, 'payment');
   const method = obj['method'];
@@ -238,11 +239,15 @@ export function parsePaymentInput(value: unknown): {
     throw ApiError.badRequest(`payment.method must be one of ${PAYMENT_METHODS.join(', ')}`);
   }
   const reference = optStr(obj, 'reference', 'payment');
+  // A targeted payment settles only one policy's items. The route checks the
+  // policy is on the account; the payment service trusts what it is given.
+  const policyId = optStr(obj, 'policyId', 'payment');
   return {
     amountCents: intNum(obj, 'amountCents', 'payment', 1),
     method: method as 'card' | 'eft' | 'cheque' | 'cash',
     ...(reference ? { reference } : {}),
     receivedAt: isoDate(obj, 'receivedAt', 'payment'),
+    ...(policyId ? { policyId } : {}),
   };
 }
 

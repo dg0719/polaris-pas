@@ -1,5 +1,6 @@
 import { accountRollup, createAccount, requireAccount, updateAccount } from '../accounts.ts';
-import { invoiceDisplayStatus, policyBilling, recordPayment } from '../billing.ts';
+import { recordPayment } from '../billing/payments.ts';
+import { accountInvoices, policyBilling } from '../billing/readModel.ts';
 import { todayIso } from '../dates.ts';
 import type { Db } from '../db.ts';
 import {
@@ -9,6 +10,7 @@ import {
   paymentDto,
   policyDto,
 } from '../dto.ts';
+import { ApiError } from '../errors.ts';
 import { created, type Router } from '../http.ts';
 import { createSubmission } from '../jobs.ts';
 import * as repo from '../repo.ts';
@@ -105,9 +107,7 @@ export function registerAccountRoutes(router: Router, db: Db): void {
       const today = todayIso();
       return {
         rollup: accountRollup(db, tenant, accountId, today),
-        invoices: repo
-          .listInvoicesForAccount(db, tenant, accountId)
-          .map((invoice) => invoiceDto({ ...invoice, displayStatus: invoiceDisplayStatus(invoice, today) })),
+        invoices: accountInvoices(db, tenant, accountId, today).map(invoiceDto),
         payments: repo.listPayments(db, tenant, accountId).map(paymentDto),
       };
     }),
@@ -119,6 +119,19 @@ export function registerAccountRoutes(router: Router, db: Db): void {
       const accountId = param(ctx, 'id');
       requireAccount(db, tenant, accountId);
       const input = parsePaymentInput(body(ctx));
+      // A targeted payment must name a policy on this account: the payment
+      // service settles whatever policy it is handed, so the check belongs
+      // here, before any money is taken.
+      if (input.policyId !== undefined) {
+        const policy = repo.getPolicy(db, tenant, input.policyId);
+        if (!policy || policy.account_id !== accountId) {
+          throw ApiError.badRequest(
+            `Policy ${input.policyId} is not on this account`,
+            'policy_not_on_account',
+          );
+        }
+      }
+      // `recordPayment` opens its own transaction, so nothing here may wrap it.
       const result = recordPayment(db, tenant, { accountId, ...input });
       return created({
         payment: paymentDto(result.payment),

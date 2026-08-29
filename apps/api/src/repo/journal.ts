@@ -96,6 +96,23 @@ export function accountBalance(
   return result.balance;
 }
 
+/**
+ * Entries whose lines do not balance. `postEntry` refuses to write one, so a
+ * healthy ledger always returns none; the invariant check reads this rather
+ * than trusting that nothing ever reached the table another way.
+ */
+export function unbalancedEntryIds(db: Db, ctx: TenantCtx): string[] {
+  const rows = db
+    .prepare(
+      `SELECT entry_id FROM journal_lines
+        WHERE tenant_id = ?
+        GROUP BY entry_id
+        HAVING SUM(debit_cents) <> SUM(credit_cents)`,
+    )
+    .all(ctx.tenantId) as unknown as { entry_id: string }[];
+  return rows.map((row) => row.entry_id);
+}
+
 export function listEntries(
   db: Db,
   ctx: TenantCtx,
