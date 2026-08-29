@@ -167,6 +167,10 @@ anything that cannot be absorbed becomes a credit the insurer owes.
 non-payment cancellation. The reconciliation idea should survive; the spreading
 rules will need to become configurable.
 
+**Superseded by D-025.** The single reconciliation invariant became four —
+ledger balance, charge coverage, receivable truth, no negative journal line —
+once billing became a double-entry ledger.
+
 ---
 
 ## D-007 · Billing depth: schedules, invoices and payments
@@ -183,6 +187,10 @@ cancellation.
 stub. The full subsystem was a large amount of work for a demonstration. This
 level is enough to show a real billing screen without inventing a payment
 gateway.
+
+**Superseded by D-025.** That schedule-and-invoice level was the arithmetic
+core; the ledger, configurable plans and immutable items in D-025–D-027 are
+the operational layer this entry left for later.
 
 ---
 
@@ -291,6 +299,9 @@ stop being premature.
 **Under D-016 this has a countdown on it.** The transition from "no data worth
 keeping" to "a carrier's book of business" happens once and cannot be undone.
 Migrations must exist before the first real user, not after.
+
+**Superseded by D-026.** Numbered, forward-only migrations now exist; the
+countdown ran out and the transition is done.
 
 ---
 
@@ -509,7 +520,205 @@ validate it. Filtering by product *and* province keeps the boundary as strict
 as the screen: a plan filed for Ontario cannot be quoted on an Alberta
 account.
 
-**Deliberate residue:** `InstallmentPlan` and the equal-split helpers in
-`packages/domain/src/billing.ts` are now unused by the API — the catalogue-
-driven scheduler replaced them. They are left in place rather than deleted in
-a screens task.
+**Deliberate residue, since resolved:** `InstallmentPlan` and the equal-split
+helpers in `packages/domain/src/billing.ts` were left in place, unused by the
+API, rather than deleted in a screens task. The file and its test were
+deleted once the ledger work that replaced them (D-025) was complete.
+
+---
+
+## D-025 · Billing is a double-entry ledger with immutable invoice items
+
+**2026-08-29**
+
+Every billing event — a charge sliced from premium, tax or a fee; premium
+earning; a payment received; a payment applied to an invoice — writes a
+journal entry of at least two lines, debits equal to credits, to a fixed
+chart of accounts (`packages/domain/src/billing/ledger.ts`). `postEntry`
+refuses to write an entry that does not balance. A charge is sliced once,
+at issue or endorsement time, into invoice items that are never edited
+again; an invoice is just the items that share an invoice id, and every
+balance — what an invoice is worth, what is outstanding, what an account
+owes — is a sum over items or ledger postings, never a stored total kept in
+step by hand.
+
+**Instead of:** the single reconciliation invariant in D-006 —
+`sum(non-void invoice amounts) === sum(transaction amounts)` — backed by a
+mutable `invoices` table that `reconcile()` rewrote on every job.
+
+**Why:** a mutable invoice cannot answer "what did the customer's bill say
+on the day we sent it", and a single sum-equality invariant cannot catch a
+posting that balances against the wrong account or a payment applied to an
+invoice it never touched. Four invariants replace it, each checked in
+`assertBillingInvariants` (`apps/api/src/billing/readModel.ts`) against a
+real account's data, not against a mock:
+
+1. **Ledger balance.** No journal entry's debits and credits differ.
+2. **Charge coverage.** Every charge's items sum to exactly the charge amount.
+3. **Receivable truth.** The premium-receivable ledger balance for an account
+   equals what its live (non-void) invoice items still owe.
+4. **No negative journal line.** No debit or credit is stored negative; a
+   reversal swaps which account is debited and which is credited instead.
+
+The rounding remainder on a sliced charge also moved from the first
+installment to the last (`splitRemainderLast`, replacing D-006's
+`splitEvenly`), so a customer's first payment — the one most likely to be
+quoted back to them on a call — is never the odd cent out.
+
+**Revisit when:** PR 2 adds payment instruments, requests, returns and
+holds — none of that changes the ledger shape, but reversal events
+(`postingsFor` currently has none) will need a posting rule of their own.
+
+---
+
+## D-026 · Numbered migrations replace reseeding
+
+**2026-08-29**
+
+`apps/api/src/migrations/` holds forward-only, numbered migrations, each
+recorded in `schema_migrations` and run once inside its own transaction.
+The v4 schema that used to be the whole database became migration 001
+(baseline); a database written before the migration runner existed is
+adopted by it rather than rejected. An existing database is converted in
+place, not thrown away: migration 002 turns every non-void legacy invoice
+into a charge, its items, and the postings behind them, then renames
+`invoices` to `legacy_invoices` and `payment_applications` to
+`legacy_payment_applications` — kept, not dropped, so nothing already on
+disk is destroyed by the upgrade.
+
+**Instead of:** D-013's rule — a schema-version mismatch fails outright and
+tells the operator to delete the database and reseed.
+
+**Why:** D-013 was right for a build with no data anyone cared about. This
+branch is the moment that stops being true even inside the demo: the billing
+tables change shape three times (charges and items, then billing runs, then
+the widened `users` role check), and a carrier's first real book of business
+is now close enough that "delete and start over" is no longer an acceptable
+answer to a schema change. D-023 records how the migrations that rebuild a
+table (SQLite cannot alter a CHECK constraint in place) get past foreign key
+enforcement safely.
+
+**Supersedes D-013**, which is marked superseded above rather than deleted.
+
+---
+
+## D-027 · Payment plans, charge patterns and tax rates are tenant configuration seeded from an illustrative catalogue
+
+**2026-08-29**
+
+`payment_plans`, `charge_patterns` and `tax_rates` are rows, not code,
+seeded per tenant from `DEFAULT_PAYMENT_PLANS` / `DEFAULT_CHARGE_PATTERNS` /
+`DEFAULT_TAX_RATES` (`packages/domain/src/billing/defaultPlans.ts`) when a
+tenant is bootstrapped. A plan's `installments` count describes a 12-month
+term (`monthly` means 12) and scales with the actual term length at slicing
+time (`installments × termMonths / 12`, rounded, minimum one) rather than
+being read literally. The Ontario auto installment fee is capped at 1.3% of
+premium by `feeCapBps`, enforced where the fee is sliced, not where the plan
+is defined, so a plan cannot be configured to exceed a cap that is itself
+configuration. Every filing reference on a fee or tax pattern is the literal
+placeholder `SAMPLE-FILING` or `null`, matching D-001's rule for rates.
+
+**Instead of:** a three-value `'full' | 'monthly' | 'quarterly'` union
+compiled into the server, which is what D-024 already retired for the API
+boundary; this decision is that same principle applied to where the plans,
+patterns and rates themselves live.
+
+**Why:** invariant 9 — a second product or carrier must not require touching
+engine code. A plan, a fee, or a tax rate is exactly the kind of fact that
+differs carrier to carrier and changes on a filing date; hard-coding any of
+it would mean a deploy every time a carrier's finance team files a new fee
+schedule.
+
+**Revisit when:** a carrier's real filed plans and tax rates replace the
+sample catalogue — a deliberate, legally weighted act, same as D-001.
+
+---
+
+## D-028 · Cancellation and endorsement re-spreading rules
+
+**2026-08-29**
+
+When a job reduces premium — a return-premium cancellation or a reducing
+endorsement — the reduction is applied against an account's invoices latest
+first, and only against the **premium** outstanding on each one. Emptying an
+invoice's premium this way reverses its fee and tax with negative items on
+those same charges and voids the invoice; a partial reduction reverses tax
+on the amount actually reduced and leaves the fee untouched, because an
+installment fee belongs to an installment that still happens. A pro-rata
+cancellation on an advance-billed schedule was proven (Task 12 review) to
+always empty whole invoices rather than partially reduce one — the partial
+case only arises from a reducing endorsement. Tax on a reduction is priced
+at the rate in force on the date of the change, not the date the original
+premium was billed.
+
+**Instead of:** reversing premium, fee and tax proportionally on every
+touched invoice regardless of how much of it was emptied, or repricing tax
+at the original billing date.
+
+**Why:** installment fees are compensation for the installments still to be
+collected; cancelling a future installment should not refund a fee for
+service already rendered on the ones already billed. Latest-invoices-first
+mirrors how the old spreading rule (D-006) treated return premium, so a
+customer's next payment still drops before their last one does.
+
+**Revisit when:** PR 2 adds the `appliesOn: 'paid'` tax recompute. Until
+then, a mid-term reduction on a policy whose province changed its tax rate
+mid-term carries a small mis-rated credit — cents, not dollars, and only on
+provinces with a rate change inside the term (Quebec's 2027-01-01 change is
+the current example).
+
+---
+
+## D-029 · Earned premium is posted daily by the billing day
+
+**2026-08-29**
+
+One process, `runBillingDay` (`apps/api/src/billing/billingDay.ts`), bills
+the invoices whose bill date has arrived and posts earned premium for every
+in-force policy version, from `max(term_start, effective_date)` to
+`term_end`, capped at cancellation. Earning is a delta against each
+version's last-posted snapshot, so a version is never earned twice and a
+day with nothing new to earn posts no journal line — a zero or negative
+earning line is refused rather than written. The run is idempotent per
+`(tenant, date)`: it is recorded before the work happens, and a second call
+for a date already run does nothing. `POST /billing/run` refuses a date
+earlier than the tenant's newest run or later than today; the same function
+also runs on a server timer.
+
+**Instead of:** earning every version from its own term start regardless of
+when it took effect, which double-counts the part of an endorsed term that
+an earlier version already earned.
+
+**Why:** `max(term_start, effective_date)` is what makes an endorsement's
+earning additive rather than double-counted — its transaction is already
+the remaining-term delta, so it only earns the days from when it took
+effect. Refusing a zero or negative line keeps invariant 4d (no negative
+journal line) true by construction rather than by a check bolted on after
+the fact, and the run-date guard stops an out-of-order run from corrupting
+an earned balance that later runs build on.
+
+**Deliberate residue:** a legitimate backfill — posting an earlier date
+after a later one already ran — currently has no path except restoring a
+backup. Acceptable for PR 1; a real backfill path is PR 2 or later.
+
+---
+
+## D-030 · Two billing roles, no default sign-ins
+
+**2026-08-29**
+
+`billing` and `finance` join the role set, gating `/billing/run` (finance or
+admin) and the finance-facing screens, but neither gets a default sign-in
+from `bootstrap.ts`. The product still ships empty with five sign-ins,
+exactly as D-022 describes; an admin creates a `billing` or `finance`
+sign-in from the Team screen the same way they create any other.
+
+**Instead of:** adding two more default sign-ins alongside the existing
+five.
+
+**Why:** the empty-start bootstrap and its tests are pinned to five
+usernames, and admin already satisfies every finance guard the new roles
+exist to narrow, so nothing is blocked by their absence. Growing the
+default sign-in list is also the wrong direction for D-022's principle: the
+fewer accounts a fresh install invents, the clearer the line between what a
+person entered and what the product assumed.

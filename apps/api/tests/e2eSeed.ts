@@ -1,5 +1,5 @@
 import { pathToFileURL } from 'node:url';
-import type { InstallmentPlan, RiskData, Role } from '@polaris/domain';
+import type { RiskData, Role } from '@polaris/domain';
 import { bootstrapTenant } from '../src/bootstrap.ts';
 import { createAccount } from '../src/accounts.ts';
 import { recordPayment } from '../src/billing/payments.ts';
@@ -18,7 +18,7 @@ import {
   underwriteJob,
 } from '../src/jobs.ts';
 import * as repo from '../src/repo.ts';
-import type { AccountRow, TenantCtx } from '../src/repo.ts';
+import type { AccountRow, PlanCode, TenantCtx } from '../src/repo.ts';
 import { account, coverages, driver, risk, vehicle } from './fixtures.ts';
 import { reportClaim } from '../src/claims/fnol.ts';
 import { assignClaim, closeClaim, closeExposure } from '../src/claims/lifecycle.ts';
@@ -66,7 +66,7 @@ function submit(
   ctx: TenantCtx,
   acct: AccountRow,
   effectiveDate: string,
-  plan: InstallmentPlan,
+  plan: PlanCode,
   riskData: RiskData,
 ) {
   return createSubmission(db, ctx, {
@@ -84,7 +84,7 @@ function issuePolicy(
   ctx: TenantCtx,
   acct: AccountRow,
   effectiveDate: string,
-  plan: InstallmentPlan,
+  plan: PlanCode,
   riskData: RiskData,
 ) {
   const job = submit(db, ctx, acct, effectiveDate, plan, riskData);

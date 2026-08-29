@@ -1,5 +1,5 @@
 import { earnedCents } from '@polaris/domain';
-import type { InstallmentPlan, Role } from '@polaris/domain';
+import type { Role } from '@polaris/domain';
 import { beforeEach, describe, expect, test } from 'vitest';
 import { runBillingDay } from '../src/billing/billingDay.ts';
 import { assertBillingInvariants } from '../src/billing/readModel.ts';
@@ -8,7 +8,7 @@ import type { Db } from '../src/db.ts';
 import { createCancellation, createPolicyChange, createSubmission } from '../src/jobs.ts';
 import { hashPassword } from '../src/passwords.ts';
 import * as repo from '../src/repo.ts';
-import type { TenantCtx } from '../src/repo.ts';
+import type { PlanCode, TenantCtx } from '../src/repo.ts';
 import { buildRouter } from '../src/routes.ts';
 import { issueSubmission, runJob, withCollision } from './billingHelpers.ts';
 import { cleanRisk, makeAccount, makeTenant, testDb } from './helpers.ts';
@@ -62,7 +62,7 @@ beforeEach(() => {
   };
 });
 
-function issue(plan: InstallmentPlan = 'monthly', risk = cleanRisk()) {
+function issue(plan: PlanCode = 'monthly', risk = cleanRisk()) {
   const job = createSubmission(db, csr, {
     accountId,
     productCode: 'ON_PA',

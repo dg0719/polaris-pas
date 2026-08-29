@@ -10,7 +10,7 @@ export type Role =
  * A payment plan code. Plans are carrier configuration, not code: the set of
  * codes comes from `GET /billing/plans`, so this is deliberately a string.
  */
-export type InstallmentPlan = string;
+export type PlanCode = string;
 export type JobStatus = 'Draft' | 'Quoted' | 'Bound' | 'Issued' | 'Declined' | 'Withdrawn';
 export type JobType = 'Submission' | 'PolicyChange' | 'Renewal' | 'Cancellation';
 
@@ -115,7 +115,7 @@ export interface Job {
   status: JobStatus;
   policyId: string | null;
   productCode: string;
-  billingPlan: InstallmentPlan;
+  billingPlan: PlanCode;
   effectiveDate: string;
   termStart: string;
   termEnd: string;
@@ -178,7 +178,7 @@ export interface Policy {
   policyNumber: string;
   productCode: string;
   status: 'InForce' | 'Cancelled' | 'Expired';
-  billingPlan: InstallmentPlan;
+  billingPlan: PlanCode;
 }
 
 export interface PolicySummary extends Policy {
