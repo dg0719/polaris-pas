@@ -1,6 +1,7 @@
 import { postingsFor, taxRateFor } from '@polaris/domain';
 import type {
   ChargeCategory,
+  LedgerAccountCode,
   ChargePatternDef,
   InstructionType,
   PaymentPlanDef,
@@ -34,6 +35,15 @@ export const INSTRUCTION_TYPE: Record<JobRow['job_type'], InstructionType> = {
   Renewal: 'renewal',
   Cancellation: 'cancellation',
 };
+
+/**
+ * The two ledger accounts the billing services read balances from by name.
+ * The codes themselves are the chart of accounts in
+ * `packages/domain/src/billing/ledger.ts`; naming them here keeps a bare
+ * four-digit literal out of the services that ask what an account holds.
+ */
+export const PREMIUM_RECEIVABLE: LedgerAccountCode = '1100';
+export const UNAPPLIED_CASH: LedgerAccountCode = '2100';
 
 /** How far ahead of its due date an invoice is sent. */
 export const LEAD_DAYS = 21;

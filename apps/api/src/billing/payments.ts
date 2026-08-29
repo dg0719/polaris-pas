@@ -4,6 +4,7 @@ import { inTransaction, type Db } from '../db.ts';
 import { ApiError } from '../errors.ts';
 import * as repo from '../repo.ts';
 import type { BillingInvoiceRow, InvoiceItemRow, PaymentRow, TenantCtx } from '../repo.ts';
+import { UNAPPLIED_CASH } from './shared.ts';
 
 // ─── Taking money and settling what it pays for ────────────────────────────
 // A payment is cash arriving, which is a fact on its own: it reaches the
@@ -36,7 +37,7 @@ export interface PaymentResult {
 /** Cash the account holds that has not settled anything yet. Unapplied cash
  * (2100) is a credit-side account, so a held balance reads negative. */
 export function unappliedCents(db: Db, ctx: TenantCtx, accountId: string): number {
-  const balance = repo.accountBalance(db, ctx, '2100', { accountId });
+  const balance = repo.accountBalance(db, ctx, UNAPPLIED_CASH, { accountId });
   // Negating a zero balance would yield `-0`, which is a distinct value in
   // JavaScript and reads as a defect everywhere downstream.
   return balance === 0 ? 0 : -balance;

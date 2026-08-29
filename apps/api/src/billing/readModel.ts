@@ -2,6 +2,7 @@ import type { Db } from '../db.ts';
 import * as repo from '../repo.ts';
 import type { BillingInvoiceRow, InvoiceItemRow, PolicyRow, TenantCtx } from '../repo.ts';
 import { unappliedCents } from './payments.ts';
+import { PREMIUM_RECEIVABLE } from './shared.ts';
 
 // ─── Reading billing back ──────────────────────────────────────────────────
 // Nothing here writes. An invoice row carries no amount of its own: what it
@@ -50,7 +51,11 @@ export function displayStatus(
   const totalCents = lines.reduce((sum, line) => sum + line.amount_cents, 0);
   if (totalCents < 0) return 'credit';
   const positive = lines.filter((line) => line.amount_cents > 0);
-  if (positive.every((line) => line.paid_cents >= line.amount_cents)) return 'paid';
+  // An invoice with nothing positive on it has collected nothing, so it is
+  // not paid — it is a schedule line waiting for its items.
+  if (positive.length > 0 && positive.every((line) => line.paid_cents >= line.amount_cents)) {
+    return 'paid';
+  }
   if (invoice.due_date < today) return 'overdue';
   if (invoice.status === 'billed' || invoice.due_date <= today) return 'due';
   return 'planned';
@@ -207,7 +212,7 @@ export function assertBillingInvariants(db: Db, ctx: TenantCtx, accountId: strin
   const owed = items
     .filter((item) => live.has(item.invoice_id))
     .reduce((sum, item) => sum + item.amount_cents - item.paid_cents, 0);
-  const receivable = repo.accountBalance(db, ctx, '1100', { accountId });
+  const receivable = repo.accountBalance(db, ctx, PREMIUM_RECEIVABLE, { accountId });
   if (owed !== receivable) {
     throw new Error(
       `Receivable truth violated: the ledger holds ${receivable} cents of premium ` +
